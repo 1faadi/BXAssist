@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { answerFromPolicy } from '@/lib/policyRag'
-import { verifySlackSignature } from '@/lib/slack'
 
 // Force dynamic rendering for this route
 export const dynamic = 'force-dynamic'
@@ -12,147 +11,97 @@ export const dynamic = 'force-dynamic'
  * 1. Immediately responds with "thinking..." message
  * 2. Processes RAG asynchronously
  * 3. Posts final answer to Slack via response_url
- * 
- * Receives /policy slash command from Slack
- * Takes the text after the command as the question
- * Calls answerFromPolicy(question) function
- * Returns answer via response_url (delayed response)
  */
 export async function POST(req: NextRequest) {
-  try {
-    // Slack sends x-www-form-urlencoded, not JSON
-    const bodyText = await req.text()
-    const params = new URLSearchParams(bodyText)
+  // 1) Parse Slack's x-www-form-urlencoded body
+  const bodyText = await req.text()
+  const params = new URLSearchParams(bodyText)
 
-    // Optional: Verify Slack signature if SLACK_SIGNING_SECRET is set
-    const signature = req.headers.get('x-slack-signature') || ''
-    const timestamp = req.headers.get('x-slack-request-timestamp') || ''
+  const command = params.get('command')
+  const question = (params.get('text') || '').trim()
+  const userId = params.get('user_id') || 'unknown'
+  const userName = params.get('user_name') || 'user'
+  const responseUrl = params.get('response_url')
 
-    // Handle Slack URL verification challenge
-    const challenge = params.get('challenge')
-    if (challenge) {
-      return NextResponse.json({ challenge })
-    }
+  console.log('[/policy] incoming', { command, userId, userName, responseUrl })
 
-    // Verify signature if signing secret is configured
-    if (process.env.SLACK_SIGNING_SECRET) {
-      if (!verifySlackSignature(bodyText, signature, timestamp)) {
-        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-      }
-    }
+  if (command !== '/policy') {
+    return new NextResponse('Unknown command', { status: 400 })
+  }
 
-    // Extract Slack payload fields
-    const token = params.get('token') // optional: legacy verification token
-    const command = params.get('command') // e.g. "/policy"
-    const text = params.get('text') || '' // the user's question
-    const userId = params.get('user_id') // U123...
-    const userName = params.get('user_name') // slack handle
-    const responseUrl = params.get('response_url') // URL to post delayed response
-
-    // Validate command
-    if (!command || command !== '/policy') {
-      return new NextResponse('Unknown command', { status: 400 })
-    }
-
-    // If no question provided, return immediate helpful message
-    if (!text.trim()) {
-      return new NextResponse(
-        'Please provide a question after the command, e.g. `/policy What is the probation period?`',
-        {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' },
-        }
-      )
-    }
-
-    // Validate response_url is present (required for delayed response)
-    if (!responseUrl) {
-      console.error('❌ Missing response_url in Slack payload')
-      return new NextResponse(
-        'Error: Missing response_url. Please configure your Slack app correctly.',
-        { status: 400 }
-      )
-    }
-
-    console.log(`📱 Slack /policy command from ${userName} (${userId}): "${text}"`)
-
-    // IMMEDIATE RESPONSE: Return "thinking..." message right away to avoid timeout
-    // This is what Slack shows immediately to the user
-    const immediateResponse = `Got it <@${userId}>, thinking about your policy question… I'll reply here in a moment.`
-
-    // FIRE-AND-FORGET: Start async task to process RAG and post answer via response_url
-    // Note: On serverless platforms like Vercel, the runtime typically allows async work
-    // to complete even after the HTTP response is sent, as long as the function doesn't
-    // terminate immediately. This is a best-effort pattern.
-    void (async () => {
-      try {
-        console.log(`🤖 Processing RAG for question: "${text}"`)
-
-        // Call the RAG function to get the answer
-        const result = await answerFromPolicy(text.trim())
-
-        // Format the final answer for Slack
-        const header = `📘 *Policy answer for <@${userId}>:*\n\n`
-        const answerText = result.answer
-
-        // Post the answer to Slack via response_url as an ephemeral message
-        // Ephemeral means only the user who ran the command will see it
-        const slackPayload = {
-          response_type: 'ephemeral',
-          text: `${header}${answerText}`,
-        }
-
-        console.log(`📤 Posting answer to Slack via response_url`)
-
-        const response = await fetch(responseUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(slackPayload),
-        })
-
-        if (!response.ok) {
-          const errorText = await response.text()
-          console.error(
-            `❌ Failed to post to response_url: ${response.status} ${errorText}`
-          )
-        } else {
-          console.log(`✅ Successfully posted answer to Slack`)
-        }
-      } catch (err) {
-        console.error('❌ Error in policy-slack async task:', err)
-
-        // Try to post error message to Slack via response_url
-        try {
-          const errorPayload = {
-            response_type: 'ephemeral',
-            text: `⚠️ Sorry, something went wrong while answering from the policy. Please try again.`,
-          }
-
-          await fetch(responseUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(errorPayload),
-          })
-        } catch (fetchError) {
-          console.error('❌ Failed to post error message to Slack:', fetchError)
-        }
-      }
-    })()
-
-    // Return immediate response to Slack (this happens synchronously)
-    return new NextResponse(immediateResponse, {
-      status: 200,
-      headers: { 'Content-Type': 'text/plain' },
-    })
-  } catch (err) {
-    console.error('❌ Slack /policy route error:', err)
+  // If user sent just `/policy`
+  if (!question) {
     return new NextResponse(
-      '⚠️ Sorry, something went wrong while processing your request.',
-      { status: 200 }
+      "Please provide a question, e.g. `/policy What is the probation period?`",
+      { status: 200, headers: { 'Content-Type': 'text/plain' } }
     )
   }
+
+  if (!responseUrl) {
+    console.error('[/policy] Missing response_url in Slack payload')
+    // We still answer synchronously as a fallback
+    const fallback = await answerFromPolicy(question)
+    return new NextResponse(
+      `📘 *Policy answer for <@${userId}>:*\n\n${fallback.answer}`,
+      { status: 200, headers: { 'Content-Type': 'text/plain' } }
+    )
+  }
+
+  // 2) Fire-and-forget async work to compute answer and POST to response_url
+  ;(async () => {
+    try {
+      console.log('[/policy] starting background RAG for', { userId })
+
+      const result = await answerFromPolicy(question)
+
+      const payload = {
+        response_type: 'ephemeral', // only visible to the user
+        text: `📘 *Policy answer for <@${userId}>:*\n\n${result.answer}`,
+      }
+
+      const res = await fetch(responseUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!res.ok) {
+        const text = await res.text()
+        console.error(
+          '[/policy] response_url POST failed',
+          res.status,
+          res.statusText,
+          text
+        )
+      } else {
+        console.log('[/policy] response_url POST ok')
+      }
+    } catch (err) {
+      console.error('[/policy] background error', err)
+      // Try to tell the user something went wrong
+      try {
+        await fetch(responseUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            response_type: 'ephemeral',
+            text:
+              '⚠️ Sorry, something went wrong while answering from the policy. Please try again.',
+          }),
+        })
+      } catch (e) {
+        console.error('[/policy] failed to send error via response_url', e)
+      }
+    }
+  })() // no await → don't delay the HTTP response
+
+  // 3) Immediate "thinking..." reply so Slack doesn't timeout
+  const thinkingMessage = `Got it <@${userId}>, thinking about your policy question... I'll reply here in a moment.`
+
+  return new NextResponse(thinkingMessage, {
+    status: 200,
+    headers: { 'Content-Type': 'text/plain' },
+  })
 }
