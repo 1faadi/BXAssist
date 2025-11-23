@@ -5,62 +5,68 @@ import { verifySlackSignature } from '@/lib/slack'
 /**
  * Slack slash command handler for /policy
  * 
- * When a user runs /policy Some question here, this endpoint:
- * 1. Extracts the question from the command text
- * 2. Calls the RAG policy-chat logic
- * 3. Returns a Slack-compatible text response
+ * Receives /policy slash command from Slack
+ * Takes the text after the command as the question
+ * Calls answerFromPolicy(question) function
+ * Returns a plain text answer back to Slack
  */
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    // Get raw body for signature verification
-    const rawBody = await request.text()
-    const signature = request.headers.get('x-slack-signature') || ''
-    const timestamp = request.headers.get('x-slack-request-timestamp') || ''
+    // Slack sends x-www-form-urlencoded, not JSON
+    const bodyText = await req.text()
+    const params = new URLSearchParams(bodyText)
 
-    // Parse the form-encoded body
-    const params = new URLSearchParams(rawBody)
+    // Optional: Verify Slack signature if SLACK_SIGNING_SECRET is set
+    const signature = req.headers.get('x-slack-signature') || ''
+    const timestamp = req.headers.get('x-slack-request-timestamp') || ''
 
     // Handle Slack URL verification challenge
     const challenge = params.get('challenge')
     if (challenge) {
-      // This is a URL verification request from Slack
       return NextResponse.json({ challenge })
     }
 
-    // Verify Slack signature for all other requests
-    if (!verifySlackSignature(rawBody, signature, timestamp)) {
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    // Verify signature if signing secret is configured
+    if (process.env.SLACK_SIGNING_SECRET) {
+      if (!verifySlackSignature(bodyText, signature, timestamp)) {
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+      }
     }
-    const text = params.get('text') || ''
+
+    const token = params.get('token') // optional: legacy verification token
+    const command = params.get('command') // e.g. "/policy"
+    const text = params.get('text') || '' // the user's question
+    const userId = params.get('user_id') // U123...
+    const userName = params.get('user_name') // slack handle
+
+    if (!command || command !== '/policy') {
+      return new NextResponse('Unknown command', { status: 400 })
+    }
 
     if (!text.trim()) {
-      return NextResponse.text(
-        'Please provide a question. Usage: /policy What is the leave policy?'
+      return new NextResponse(
+        'Please provide a question, e.g. `/policy What is the probation period?`',
+        { status: 200 }
       )
     }
 
-    // Get answer from policy
+    console.log(`📱 Slack /policy command from ${userName} (${userId}): "${text}"`)
+
     const result = await answerFromPolicy(text.trim())
 
-    // Format response for Slack
-    let response = 'According to the policy:\n\n' + result.answer
+    const header = `📘 *Policy answer for <@${userId}>:*\n`
+    const body = result.answer
 
-    // If the answer indicates it's not in the policy, adjust the response
-    if (
-      result.answer.includes("doesn't appear clearly") ||
-      result.answer.includes('not defined') ||
-      result.answer.includes('does not appear to be clearly defined')
-    ) {
-      response =
-        "This doesn't appear clearly in the policy documents. Please consult with HR for clarification."
-    }
-
-    return NextResponse.text(response)
-  } catch (error: any) {
-    console.error('Error in policy-slack API:', error)
-    return NextResponse.text(
-      '❌ An error occurred while processing your question. Please try again later.',
-      { status: 500 }
+    // Slack slash commands accept plain text / markdown-style text
+    return new NextResponse(`${header}\n${body}`, {
+      status: 200,
+      headers: { 'Content-Type': 'text/plain' },
+    })
+  } catch (err) {
+    console.error('❌ Slack /policy error:', err)
+    return new NextResponse(
+      '⚠️ Sorry, something went wrong while answering from the policy.',
+      { status: 200 }
     )
   }
 }
