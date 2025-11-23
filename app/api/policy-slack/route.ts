@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { answerFromPolicy } from '@/lib/policyRag'
 import { verifySlackSignature } from '@/lib/slack'
 
+// Force dynamic rendering for this route
+export const dynamic = 'force-dynamic'
+
 /**
  * Slack slash command handler for /policy
  * 

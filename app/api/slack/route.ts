@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { appendRow } from '@/lib/googleSheets'
 import { postMessage, openModal, verifySlackSignature } from '@/lib/slack'
 
+// Force dynamic rendering for this route
+export const dynamic = 'force-dynamic'
+
 /**
  * Handle Slack slash commands and interactive payloads
  * 
@@ -101,12 +104,13 @@ async function handleCheckin(
     // Append row: Date, User ID, User Name, Check-in, Checkout
     await appendRow('Attendance!A:E', [dateStr, userId, userName, timeStr, ''])
 
-    return NextResponse.text(
-      `✅ Check-in recorded for ${userName} at ${timeStr}`
+    return new NextResponse(
+      `✅ Check-in recorded for ${userName} at ${timeStr}`,
+      { status: 200 }
     )
   } catch (error: any) {
     console.error('Error recording check-in:', error)
-    return NextResponse.text(
+    return new NextResponse(
       '❌ Error recording check-in. Please try again or contact support.',
       { status: 500 }
     )
@@ -129,12 +133,13 @@ async function handleCheckout(
     // Append row: Date, User ID, User Name, Check-in (blank), Checkout
     await appendRow('Attendance!A:E', [dateStr, userId, userName, '', timeStr])
 
-    return NextResponse.text(
-      `✅ Checkout recorded for ${userName} at ${timeStr}`
+    return new NextResponse(
+      `✅ Checkout recorded for ${userName} at ${timeStr}`,
+      { status: 200 }
     )
   } catch (error: any) {
     console.error('Error recording checkout:', error)
-    return NextResponse.text(
+    return new NextResponse(
       '❌ Error recording checkout. Please try again or contact support.',
       { status: 500 }
     )
@@ -253,7 +258,7 @@ async function handleLeaveModal(triggerId: string): Promise<NextResponse> {
     const result = await openModal(triggerId, modalView)
 
     if (!result.ok) {
-      return NextResponse.text(
+      return new NextResponse(
         '❌ Error opening leave request form. Please try again.',
         { status: 500 }
       )
@@ -263,7 +268,7 @@ async function handleLeaveModal(triggerId: string): Promise<NextResponse> {
     return NextResponse.json({})
   } catch (error: any) {
     console.error('Error opening leave modal:', error)
-    return NextResponse.text(
+    return new NextResponse(
       '❌ Error opening leave request form. Please try again.',
       { status: 500 }
     )

@@ -70,6 +70,11 @@ export function verifySlackSignature(
 ): boolean {
   const signingSecret = process.env.SLACK_SIGNING_SECRET
 
+  if (!signingSecret) {
+    console.warn('SLACK_SIGNING_SECRET not set, skipping signature verification')
+    return false
+  }
+
   // Check if timestamp is too old (replay attack protection)
   const currentTime = Math.floor(Date.now() / 1000)
   if (Math.abs(currentTime - parseInt(timestamp)) > 300) {

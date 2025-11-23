@@ -15,6 +15,9 @@ import { postMessage } from '@/lib/slack'
  *   Row 1 (header): User ID | User Name | Birthday (YYYY-MM-DD)
  *   Row 2+: Data rows
  */
+// Force dynamic rendering for this route
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest) {
   try {
     // Verify token

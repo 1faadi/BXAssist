@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { answerFromPolicy } from '@/lib/policyRag'
 
+// Force dynamic rendering for this route
+export const dynamic = 'force-dynamic'
+
 /**
  * Policy Chat API endpoint
  * 

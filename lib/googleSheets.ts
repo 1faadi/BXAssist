@@ -4,7 +4,11 @@ import { google } from 'googleapis'
  * Get an authenticated Google Sheets client using service account credentials
  */
 function getSheetsClient() {
-  const serviceAccountKey = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
+  const serviceAccountJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+  if (!serviceAccountJson) {
+    throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON environment variable is not set')
+  }
+  const serviceAccountKey = JSON.parse(serviceAccountJson)
   const auth = new google.auth.GoogleAuth({
     credentials: serviceAccountKey,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
@@ -21,6 +25,9 @@ function getSheetsClient() {
 export async function appendRow(range: string, values: any[]): Promise<void> {
   const sheets = getSheetsClient()
   const spreadsheetId = process.env.SPREADSHEET_ID
+  if (!spreadsheetId) {
+    throw new Error('SPREADSHEET_ID environment variable is not set')
+  }
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,
@@ -40,6 +47,9 @@ export async function appendRow(range: string, values: any[]): Promise<void> {
 export async function getValues(range: string): Promise<any[][]> {
   const sheets = getSheetsClient()
   const spreadsheetId = process.env.SPREADSHEET_ID
+  if (!spreadsheetId) {
+    throw new Error('SPREADSHEET_ID environment variable is not set')
+  }
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId,
