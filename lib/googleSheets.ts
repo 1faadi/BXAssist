@@ -1,4 +1,24 @@
-// lib/googleSheets.ts
+/**
+ * Google Sheets Integration for Leave Requests
+ * 
+ * This module handles all Google Sheets operations for the leave request system.
+ * 
+ * Current leave decision model: Single manager, approve/reject, synced with Google Sheets.
+ * 
+ * Sheet structure (LeaveRequests tab):
+ * A: Timestamp
+ * B: SlackUserId
+ * C: EmployeeName
+ * D: FromDate
+ * E: ToDate
+ * F: LeaveType
+ * G: Reason
+ * H: Status (Pending, Approved, Rejected)
+ * I: DecisionBy (manager name who decided)
+ * J: DecisionAt (ISO datetime)
+ * K: SlackMessageTs
+ * L: SlackChannelId
+ */
 
 import { google } from 'googleapis'
 
@@ -20,22 +40,9 @@ const auth = new google.auth.JWT(
 const sheets = google.sheets({ version: 'v4', auth })
 
 /**
- * Append a new leave row
- * Columns:
- * A Timestamp
- * B SlackUserId
- * C EmployeeName
- * D FromDate
- * E ToDate
- * F LeaveType
- * G Reason
- * H Status
- * I Manager1ApprovedBy
- * J Manager1ApprovedAt
- * K Manager2ApprovedBy
- * L Manager2ApprovedAt
- * M SlackMessageTs
- * N SlackChannelId
+ * Append a new leave request row to Google Sheets
+ * 
+ * Creates a new row with status "Pending" and empty DecisionBy/DecisionAt fields.
  */
 export async function appendLeaveRequestRow(params: {
   timestamp: string
@@ -45,7 +52,7 @@ export async function appendLeaveRequestRow(params: {
   toDate: string
   leaveType: string
   reason: string
-  status: string
+  status: string // initially "Pending"
   slackMessageTs: string
   slackChannelId: string
 }) {
@@ -77,12 +84,10 @@ export async function appendLeaveRequestRow(params: {
           leaveType, // F
           reason, // G
           status, // H
-          '', // I Manager1ApprovedBy
-          '', // J Manager1ApprovedAt
-          '', // K Manager2ApprovedBy
-          '', // L Manager2ApprovedAt
-          slackMessageTs, // M
-          slackChannelId, // N
+          '', // I DecisionBy (empty for new requests)
+          '', // J DecisionAt (empty for new requests)
+          slackMessageTs, // K
+          slackChannelId, // L
         ],
       ],
     },
@@ -90,19 +95,24 @@ export async function appendLeaveRequestRow(params: {
 }
 
 /**
- * Update approval status when a manager clicks their button
+ * Set leave decision (Approve or Reject) in Google Sheets
+ * 
+ * Finds the leave request by channelId and messageTs, then updates:
+ * - Status (H) to "Approved" or "Rejected"
+ * - DecisionBy (I) to the manager's name
+ * - DecisionAt (J) to current ISO timestamp
  */
-export async function updateLeaveRequestApproval(args: {
+export async function setLeaveDecision(args: {
   channelId: string
   messageTs: string
-  approverName: string
-  approverRole: 'manager1' | 'manager2'
-}): Promise<{ status: string; manager1Approved: boolean; manager2Approved: boolean }> {
-  const { channelId, messageTs, approverName, approverRole } = args
+  decision: 'Approved' | 'Rejected'
+  decidedBy: string // manager display name
+}): Promise<{ status: string; decidedBy: string; decidedAt: string }> {
+  const { channelId, messageTs, decision, decidedBy } = args
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'LeaveRequests!A2:N1000', // now A–N
+    range: 'LeaveRequests!A2:L1000', // skip header, columns A-L
   })
 
   const rows = res.data.values || []
@@ -111,8 +121,8 @@ export async function updateLeaveRequestApproval(args: {
   let row: string[] | undefined
 
   rows.forEach((r, idx) => {
-    const ts = r[12] // SlackMessageTs (M)
-    const ch = r[13] // SlackChannelId (N)
+    const ts = r[10] // SlackMessageTs (K)
+    const ch = r[11] // SlackChannelId (L)
     if (ts === messageTs && ch === channelId) {
       foundRowIndex = idx + 2 // because data starts at row 2
       row = r
@@ -123,59 +133,26 @@ export async function updateLeaveRequestApproval(args: {
     throw new Error('Leave request row not found in sheet')
   }
 
-  // Ensure row has all 14 columns
-  while (row.length < 14) row.push('')
+  // Ensure row has all 12 columns
+  while (row.length < 12) row.push('')
 
-  // indexes with new layout:
-  let status = row[7] || 'Pending'
-  let m1By = row[8] || ''
-  let m1At = row[9] || ''
-  let m2By = row[10] || ''
-  let m2At = row[11] || ''
+  const decidedAt = new Date().toISOString()
 
-  const nowIso = new Date().toISOString()
-
-  if (approverRole === 'manager1') {
-    if (!m1By) {
-      m1By = approverName
-      m1At = nowIso
-    }
-  } else {
-    if (!m2By) {
-      m2By = approverName
-      m2At = nowIso
-    }
-  }
-
-  const manager1Approved = !!m1By
-  const manager2Approved = !!m2By
-
-  if (manager1Approved && manager2Approved) {
-    status = 'Approved'
-  } else if (manager1Approved && !manager2Approved) {
-    status = 'Approved by Manager 1'
-  } else if (!manager1Approved && manager2Approved) {
-    status = 'Approved by Manager 2'
-  } else {
-    status = 'Pending'
-  }
-
-  row[7] = status
-  row[8] = m1By
-  row[9] = m1At
-  row[10] = m2By
-  row[11] = m2At
+  // Update columns
+  row[7] = decision // Status (H)
+  row[8] = decidedBy // DecisionBy (I)
+  row[9] = decidedAt // DecisionAt (J)
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: `LeaveRequests!A${foundRowIndex}:N${foundRowIndex}`, // A–N
+    range: `LeaveRequests!A${foundRowIndex}:L${foundRowIndex}`,
     valueInputOption: 'RAW',
     requestBody: {
       values: [row],
     },
   })
 
-  return { status, manager1Approved, manager2Approved }
+  return { status: decision, decidedBy, decidedAt }
 }
 
 // Helper functions for other parts of the app

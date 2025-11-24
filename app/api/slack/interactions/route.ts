@@ -1,11 +1,21 @@
-// app/api/slack/interactions/route.ts
+/**
+ * Slack Interactivity Handler for Leave Requests
+ * 
+ * This endpoint handles Slack interactivity payloads:
+ * - Modal submissions (leave request form)
+ * - Button clicks (Approve/Reject decisions)
+ * 
+ * Current leave decision model: Single manager, approve/reject, synced with Google Sheets.
+ * 
+ * Flow:
+ * 1. User submits /leave-req modal → message posted with Approve/Reject buttons
+ * 2. Manager clicks Approve or Reject → updates Google Sheets and Slack message
+ * 3. Buttons are removed after decision is made
+ */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { slackClient } from '@/lib/slackClient'
-import {
-  appendLeaveRequestRow,
-  updateLeaveRequestApproval,
-} from '@/lib/googleSheets'
+import { appendLeaveRequestRow, setLeaveDecision } from '@/lib/googleSheets'
 
 const LEAVE_CHANNEL_ID = process.env.SLACK_LEAVE_CHANNEL_ID
 
@@ -35,13 +45,14 @@ export async function POST(req: NextRequest) {
     ) {
       const state = payload.view.state.values
 
-      // Based on your logged payload structure
+      // Extract form values
       const fromDate: string = state.leave_from_date.value.selected_date
       const toDate: string = state.leave_to_date.value.selected_date
       const leaveType: string = state.leave_type.value.selected_option.value
       const reason: string = state.reason.value.value
       const slackUserId: string = payload.user.id
 
+      // Get employee's display name
       const userInfo = await slackClient.users.info({ user: slackUserId })
       const employeeName =
         (userInfo.user?.profile as any)?.real_name ||
@@ -49,7 +60,7 @@ export async function POST(req: NextRequest) {
         payload.user.username ||
         slackUserId
 
-      // Post message with approve buttons
+      // Post message with Approve/Reject buttons
       const message = await slackClient.chat.postMessage({
         channel: LEAVE_CHANNEL_ID,
         text: `New leave request from ${employeeName}`, // fallback
@@ -66,31 +77,31 @@ export async function POST(req: NextRequest) {
             elements: [
               {
                 type: 'mrkdwn',
-                text: '*Status:* Pending approval',
+                text: '*Status:* Pending',
               },
             ],
           },
           {
             type: 'actions',
-            block_id: 'leave_approvals',
+            block_id: 'leave_decision',
             elements: [
               {
                 type: 'button',
                 text: {
                   type: 'plain_text',
-                  text: 'Approve (Manager 1)',
+                  text: 'Approve',
                 },
-                action_id: 'approve_manager_1',
                 style: 'primary',
+                action_id: 'leave_approve',
               },
               {
                 type: 'button',
                 text: {
                   type: 'plain_text',
-                  text: 'Approve (Manager 2)',
+                  text: 'Reject',
                 },
-                action_id: 'approve_manager_2',
-                style: 'primary',
+                style: 'danger',
+                action_id: 'leave_reject',
               },
             ],
           },
@@ -101,6 +112,7 @@ export async function POST(req: NextRequest) {
       const channelId = message.channel as string
       const nowIso = new Date().toISOString()
 
+      // Save to Google Sheets
       await appendLeaveRequestRow({
         timestamp: nowIso,
         slackUserId,
@@ -118,21 +130,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ response_action: 'clear' })
     }
 
-    // 2) Handle button clicks (approvals)
+    // 2) Handle button clicks (Approve/Reject)
     if (payload.type === 'block_actions') {
       const action = payload.actions?.[0]
       if (!action) return new NextResponse('', { status: 200 })
 
-      // Only handle our approve buttons
+      // Only handle our decision buttons
       if (
-        action.action_id !== 'approve_manager_1' &&
-        action.action_id !== 'approve_manager_2'
+        action.action_id !== 'leave_approve' &&
+        action.action_id !== 'leave_reject'
       ) {
         return new NextResponse('', { status: 200 })
       }
 
-      const approverRole =
-        action.action_id === 'approve_manager_1' ? 'manager1' : 'manager2'
+      // Determine decision
+      const decision: 'Approved' | 'Rejected' =
+        action.action_id === 'leave_approve' ? 'Approved' : 'Rejected'
 
       const channelId: string =
         payload.container?.channel_id || payload.channel?.id
@@ -143,6 +156,7 @@ export async function POST(req: NextRequest) {
         return new NextResponse('Missing channel/ts', { status: 400 })
       }
 
+      // Get manager (approver) info
       const approverId: string = payload.user.id
       const approverInfo = await slackClient.users.info({ user: approverId })
       const approverName =
@@ -151,56 +165,45 @@ export async function POST(req: NextRequest) {
         payload.user.username ||
         approverId
 
-      const { status, manager1Approved, manager2Approved } =
-        await updateLeaveRequestApproval({
-          channelId,
-          messageTs,
-          approverName,
-          approverRole,
-        })
+      // Update Google Sheets
+      const { status, decidedBy, decidedAt } = await setLeaveDecision({
+        channelId,
+        messageTs,
+        decision,
+        decidedBy: approverName,
+      })
 
-      // Update message blocks: status text + remove buttons as needed
+      // Build updated blocks for Slack message
       const blocks = payload.message.blocks as any[]
       const updatedBlocks = blocks
         .map((block: any) => {
           if (block.type === 'context') {
-            // Replace status line
+            // Update status line with decision info
             return {
               ...block,
               elements: [
                 {
                   type: 'mrkdwn',
-                  text: `*Status:* ${status}`,
+                  text: `*Status:* ${status} by ${decidedBy} at ${new Date(decidedAt).toLocaleString()}`,
                 },
               ],
             }
           }
 
-          if (block.type === 'actions' && block.block_id === 'leave_approvals') {
-            // If fully approved, remove action block entirely
-            if (manager1Approved && manager2Approved) {
-              return null
-            }
-
-            // Otherwise remove only the clicked button
-            const filteredElements = block.elements.filter(
-              (el: any) => el.action_id !== action.action_id
-            )
-
-            return {
-              ...block,
-              elements: filteredElements,
-            }
+          if (block.type === 'actions' && block.block_id === 'leave_decision') {
+            // Remove the actions block entirely after decision
+            return null
           }
 
           return block
         })
         .filter(Boolean) // remove null blocks
 
+      // Update Slack message
       await slackClient.chat.update({
         channel: channelId,
         ts: messageTs,
-        text: `Leave request status: ${status}`,
+        text: `Leave request ${status.toLowerCase()} by ${decidedBy}`, // fallback
         blocks: updatedBlocks as any,
       })
 
