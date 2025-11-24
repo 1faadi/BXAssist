@@ -5,23 +5,29 @@
 declare namespace NodeJS {
   interface ProcessEnv {
     // OpenRouter configuration (for embeddings and chat completions)
-    OPENROUTER_API_KEY: string
+    OPENROUTER_API_KEY?: string
     APP_URL?: string // Optional: for OpenRouter app attribution
 
     // Qdrant configuration
-    QDRANT_URL: string
-    QDRANT_API_KEY: string
+    QDRANT_URL?: string
+    QDRANT_API_KEY?: string
     QDRANT_COLLECTION_NAME?: string // Optional: defaults to 'policy-index'
 
-    // Slack configuration (optional, for future integration)
-    SLACK_BOT_TOKEN?: string
-    SLACK_SIGNING_SECRET?: string
+    // Slack configuration
+    SLACK_BOT_TOKEN: string
+    SLACK_SIGNING_SECRET: string
+    SLACK_LEAVE_CHANNEL_ID: string // Channel ID where leave requests are posted
 
-    // Google Sheets configuration (optional, for future integration)
+    // Google Sheets configuration
+    // Option 1: New format (preferred)
+    GOOGLE_SHEETS_CLIENT_EMAIL?: string
+    GOOGLE_SHEETS_PRIVATE_KEY?: string
+    GOOGLE_SHEETS_SPREADSHEET_ID?: string
+    // Option 2: Legacy format (full JSON string)
     SPREADSHEET_ID?: string
     GOOGLE_SERVICE_ACCOUNT_JSON?: string
 
-    // Birthday cron token (optional, for future integration)
+    // Birthday cron token (optional)
     BIRTHDAY_CRON_TOKEN?: string
   }
 }
