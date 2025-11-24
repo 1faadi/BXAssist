@@ -155,6 +155,158 @@ export async function setLeaveDecision(args: {
   return { status: decision, decidedBy, decidedAt }
 }
 
+/**
+ * Record check-in for an employee
+ * 
+ * Attendance sheet structure:
+ * A: Date (YYYY-MM-DD)
+ * B: SlackUserId
+ * C: EmployeeName
+ * D: CheckIn (HH:MM:SS)
+ * E: CheckOut (HH:MM:SS)
+ * 
+ * Returns:
+ * - alreadyCheckedIn: true if check-in already exists for today
+ * - checkInTime: time of check-in (if already checked in)
+ * - date: date string
+ */
+export async function recordCheckIn(params: {
+  slackUserId: string
+  employeeName: string
+}): Promise<{ alreadyCheckedIn: boolean; checkInTime?: string; date: string }> {
+  const { slackUserId, employeeName } = params
+  const now = new Date()
+  const dateStr = now.toISOString().split('T')[0] // YYYY-MM-DD
+  const timeStr = now.toTimeString().split(' ')[0] // HH:MM:SS
+
+  // Check if already checked in today
+  const range = 'Attendance!A2:E1000'
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+  })
+
+  const rows = response.data.values || []
+  for (const row of rows) {
+    if (row[0] === dateStr && row[1] === slackUserId && row[3]) {
+      // Already checked in today
+      return {
+        alreadyCheckedIn: true,
+        checkInTime: row[3],
+        date: dateStr,
+      }
+    }
+  }
+
+  // Append new check-in row
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Attendance!A1',
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [[dateStr, slackUserId, employeeName, timeStr, '']],
+    },
+  })
+
+  return {
+    alreadyCheckedIn: false,
+    date: dateStr,
+  }
+}
+
+/**
+ * Record checkout for an employee
+ * 
+ * Finds today's check-in row and updates the checkout time.
+ * 
+ * Returns:
+ * - canCheckout: false if no check-in found for today
+ * - alreadyCheckedOut: true if already checked out
+ * - checkOutTime: time of checkout (if already checked out)
+ * - checkInTime: time of check-in
+ * - date: date string
+ * - totalHours: calculated hours between check-in and checkout
+ */
+export async function recordCheckOut(params: {
+  slackUserId: string
+  employeeName: string
+}): Promise<{
+  canCheckout: boolean
+  alreadyCheckedOut?: boolean
+  checkOutTime?: string
+  checkInTime?: string
+  date?: string
+  totalHours?: number
+}> {
+  const { slackUserId, employeeName } = params
+  const now = new Date()
+  const dateStr = now.toISOString().split('T')[0] // YYYY-MM-DD
+  const timeStr = now.toTimeString().split(' ')[0] // HH:MM:SS
+
+  // Find today's check-in row
+  const range = 'Attendance!A2:E1000'
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+  })
+
+  const rows = response.data.values || []
+  let foundRowIndex: number | null = null
+  let row: string[] | undefined
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]
+    if (r[0] === dateStr && r[1] === slackUserId && r[3]) {
+      // Found today's check-in
+      foundRowIndex = i + 2 // Convert to 1-based, accounting for header
+      row = r
+      break
+    }
+  }
+
+  if (!row || !foundRowIndex) {
+    return { canCheckout: false }
+  }
+
+  // Check if already checked out
+  if (row[4]) {
+    return {
+      canCheckout: true,
+      alreadyCheckedOut: true,
+      checkOutTime: row[4],
+      checkInTime: row[3],
+      date: dateStr,
+    }
+  }
+
+  // Update checkout time
+  row[4] = timeStr
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `Attendance!A${foundRowIndex}:E${foundRowIndex}`,
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [row],
+    },
+  })
+
+  // Calculate total hours
+  const checkInTime = row[3]
+  const checkInDate = new Date(`${dateStr}T${checkInTime}`)
+  const checkOutDate = new Date(`${dateStr}T${timeStr}`)
+  const totalMs = checkOutDate.getTime() - checkInDate.getTime()
+  const totalHours = totalMs / (1000 * 60 * 60)
+
+  return {
+    canCheckout: true,
+    alreadyCheckedOut: false,
+    checkOutTime: timeStr,
+    checkInTime: checkInTime,
+    date: dateStr,
+    totalHours: Math.round(totalHours * 100) / 100, // Round to 2 decimals
+  }
+}
+
 // Helper functions for other parts of the app
 export async function appendRow(range: string, values: any[]): Promise<void> {
   await sheets.spreadsheets.values.append({

@@ -18,6 +18,12 @@ declare namespace NodeJS {
     SLACK_SIGNING_SECRET: string
     SLACK_LEAVE_CHANNEL_ID: string // Channel ID where leave requests are posted
     SLACK_DAILY_REPORT_CHANNEL_ID?: string // Channel ID where daily reports are posted
+    SLACK_ATTENDANCE_CHANNEL_ID?: string // Channel ID where attendance messages are posted
+
+    // Attendance security
+    APP_BASE_URL: string // Base URL for generating signed attendance links (e.g., https://bx-assist.vercel.app)
+    OFFICE_IP_ALLOWLIST?: string // Comma-separated list of public office IP addresses
+    ATTENDANCE_SIGNING_SECRET?: string // Secret for signing attendance URLs
 
     // Google Sheets configuration
     // Option 1: New format (preferred)

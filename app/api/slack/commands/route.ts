@@ -4,6 +4,8 @@
  * This endpoint handles Slack slash commands:
  * - /leave-req - Opens leave request modal
  * - /daily-report - Opens daily progress report modal
+ * - /check-in - Returns ephemeral message with button to open check-in page (office network only)
+ * - /checkout - Returns ephemeral message with button to open checkout page (office network only)
  * 
  * Slack Configuration:
  * - Slash command URL: https://your-domain.vercel.app/api/slack/commands
@@ -12,6 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { slackClient } from '@/lib/slackClient'
+import { generateSignedAttendanceUrl } from '@/lib/attendanceSecurity'
 
 // Force dynamic rendering for this route
 export const dynamic = 'force-dynamic'
@@ -25,9 +28,106 @@ export async function POST(req: NextRequest) {
     const command = params.get('command')
     const triggerId = params.get('trigger_id')
     const userId = params.get('user_id')
+    const channelId = params.get('channel_id')
 
     console.log('Slash command received', { command, userId })
 
+    const attendanceChannelId = process.env.SLACK_ATTENDANCE_CHANNEL_ID
+    const isAttendanceChannel = channelId === attendanceChannelId
+
+    // Handle /check-in command
+    if (command === '/check-in') {
+      if (!userId) {
+        return NextResponse.json(
+          { error: 'Missing user_id' },
+          { status: 400 }
+        )
+      }
+
+      if (!isAttendanceChannel) {
+        return NextResponse.json({
+          response_type: 'ephemeral',
+          text: `Please use \`/check-in\` in the designated attendance channel.`,
+        })
+      }
+
+      const url = generateSignedAttendanceUrl({
+        type: 'checkin',
+        slackUserId: userId,
+      })
+
+      return NextResponse.json({
+        response_type: 'ephemeral',
+        text: 'Click the button below to complete your check-in (office network only).',
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: 'Click the button below to complete your check-in (available only on the office network).',
+            },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'Open check-in page' },
+                url,
+              },
+            ],
+          },
+        ],
+      })
+    }
+
+    // Handle /checkout command
+    if (command === '/checkout') {
+      if (!userId) {
+        return NextResponse.json(
+          { error: 'Missing user_id' },
+          { status: 400 }
+        )
+      }
+
+      if (!isAttendanceChannel) {
+        return NextResponse.json({
+          response_type: 'ephemeral',
+          text: `Please use \`/checkout\` in the designated attendance channel.`,
+        })
+      }
+
+      const url = generateSignedAttendanceUrl({
+        type: 'checkout',
+        slackUserId: userId,
+      })
+
+      return NextResponse.json({
+        response_type: 'ephemeral',
+        text: 'Click the button below to complete your checkout (office network only).',
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: 'Click the button below to complete your checkout (available only on the office network).',
+            },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'Open check-out page' },
+                url,
+              },
+            ],
+          },
+        ],
+      })
+    }
+
+    // Commands that require trigger_id (modals)
     if (!triggerId) {
       return new NextResponse('Missing trigger_id', { status: 400 })
     }
@@ -226,10 +326,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Unknown command
-    return NextResponse.json(
-      { error: `Unknown command: ${command}` },
-      { status: 400 }
-    )
+    return NextResponse.json({
+      response_type: 'ephemeral',
+      text: `Unknown command: ${command}. Available commands: /check-in, /checkout, /leave-req, /daily-report`,
+    })
   } catch (err) {
     console.error('Error in /api/slack/commands', err)
     return new NextResponse('Server error', { status: 500 })
