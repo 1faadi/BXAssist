@@ -1,9 +1,11 @@
 /**
- * Slack Interactivity Handler for Leave Requests
+ * Slack Interactivity Handler
  * 
  * This endpoint handles Slack interactivity payloads:
- * - Modal submissions (leave request form)
- * - Button clicks (Approve/Reject decisions)
+ * - Modal submissions:
+ *   - leave_request_modal: Leave request form
+ *   - daily_report_modal: Daily progress report form
+ * - Button clicks (Approve/Reject decisions for leave requests)
  * 
  * Current leave decision model: Single manager, approve/reject, synced with Google Sheets.
  * 
@@ -11,6 +13,9 @@
  * 1. User submits /leave-req modal → message posted with Approve/Reject buttons
  * 2. Manager clicks Approve or Reject → updates Google Sheets and Slack message
  * 3. Buttons are removed after decision is made
+ * 
+ * Daily Report Flow:
+ * 1. User submits /daily-report modal → formatted report posted to daily report channel
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -38,7 +43,7 @@ export async function POST(req: NextRequest) {
 
     const payload = JSON.parse(payloadStr)
 
-    // 1) Handle modal submission
+    // 1) Handle leave request modal submission
     if (
       payload.type === 'view_submission' &&
       payload.view?.callback_id === 'leave_request_modal'
@@ -130,7 +135,123 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ response_action: 'clear' })
     }
 
-    // 2) Handle button clicks (Approve/Reject)
+    // 2) Handle daily report modal submission
+    if (
+      payload.type === 'view_submission' &&
+      payload.view?.callback_id === 'daily_report_modal'
+    ) {
+      const state = payload.view.state.values
+
+      // Extract form values
+      const projectName = state.dr_project_name.value.value
+      const hours = state.dr_hours.value.value
+      const reportingUsers: string[] = state.dr_reporting_to.value.selected_users
+      const progressText = state.dr_progress.value.value
+      const tomorrowPlan = state.dr_tomorrow?.value?.value ?? ''
+
+      // Get reporter info
+      const reporterId: string = payload.user.id
+      const userInfo = await slackClient.users.info({ user: reporterId })
+      const reporterName =
+        (userInfo.user?.profile as any)?.real_name ||
+        (userInfo.user?.profile as any)?.display_name ||
+        payload.user.username ||
+        reporterId
+
+      // Format current date
+      const now = new Date()
+      const dateStr = now.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      })
+
+      // Convert selected reporting users to Slack mentions
+      const reportingMentions =
+        reportingUsers.length > 0
+          ? reportingUsers.map((id) => `<@${id}>`).join(' ')
+          : 'N/A'
+
+      // Build message blocks
+      const blocks: any[] = [
+        {
+          type: 'header',
+          text: {
+            type: 'plain_text',
+            text: 'Daily Progress Report',
+          },
+        },
+        {
+          type: 'section',
+          fields: [
+            {
+              type: 'mrkdwn',
+              text: `*Reporter:*\n<@${reporterId}> (${reporterName})`,
+            },
+            {
+              type: 'mrkdwn',
+              text: `*Date:*\n${dateStr}`,
+            },
+            {
+              type: 'mrkdwn',
+              text: `*Project:*\n${projectName}`,
+            },
+            {
+              type: 'mrkdwn',
+              text: `*Hours:*\n${hours}`,
+            },
+            {
+              type: 'mrkdwn',
+              text: `*Reporting To:*\n${reportingMentions}`,
+            },
+          ],
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*Tasks / Progress:*\n${progressText}`,
+          },
+        },
+      ]
+
+      // Add tomorrow's plan if provided
+      if (tomorrowPlan.trim()) {
+        blocks.push({
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*Tomorrow's Plan:*\n${tomorrowPlan}`,
+          },
+        })
+      }
+
+      // Post to daily report channel
+      const dailyReportChannelId = process.env.SLACK_DAILY_REPORT_CHANNEL_ID
+      if (!dailyReportChannelId) {
+        console.error('SLACK_DAILY_REPORT_CHANNEL_ID is not set')
+        return NextResponse.json(
+          {
+            response_action: 'errors',
+            errors: {
+              dr_project_name: 'Daily report channel not configured. Please contact admin.',
+            },
+          },
+          { status: 500 }
+        )
+      }
+
+      await slackClient.chat.postMessage({
+        channel: dailyReportChannelId,
+        text: `Daily report from ${reporterName}`, // fallback
+        blocks,
+      })
+
+      // Close modal
+      return NextResponse.json({ response_action: 'clear' })
+    }
+
+    // 3) Handle button clicks (Approve/Reject)
     if (payload.type === 'block_actions') {
       const action = payload.actions?.[0]
       if (!action) return new NextResponse('', { status: 200 })

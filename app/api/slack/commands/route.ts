@@ -1,4 +1,14 @@
-// app/api/slack/commands/route.ts
+/**
+ * Slack Slash Commands Handler
+ * 
+ * This endpoint handles Slack slash commands:
+ * - /leave-req - Opens leave request modal
+ * - /daily-report - Opens daily progress report modal
+ * 
+ * Slack Configuration:
+ * - Slash command URL: https://your-domain.vercel.app/api/slack/commands
+ * - Method: POST
+ */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { slackClient } from '@/lib/slackClient'
@@ -22,100 +32,204 @@ export async function POST(req: NextRequest) {
       return new NextResponse('Missing trigger_id', { status: 400 })
     }
 
-    // Default leave dates = tomorrow in YYYY-MM-DD
-    const today = new Date()
-    today.setDate(today.getDate() + 1)
-    const defaultFrom = today.toISOString().slice(0, 10)
-    // default To = same as From for now
-    const defaultTo = defaultFrom
+    // Handle /leave-req command
+    if (command === '/leave-req') {
+      // Default leave dates = tomorrow in YYYY-MM-DD
+      const today = new Date()
+      today.setDate(today.getDate() + 1)
+      const defaultFrom = today.toISOString().slice(0, 10)
+      // default To = same as From for now
+      const defaultTo = defaultFrom
 
-    // Open Slack modal
-    await slackClient.views.open({
-      trigger_id: triggerId,
-      view: {
-        type: 'modal',
-        callback_id: 'leave_request_modal',
-        title: {
-          type: 'plain_text',
-          text: 'Leave Request',
-        },
-        submit: {
-          type: 'plain_text',
-          text: 'Submit',
-        },
-        close: {
-          type: 'plain_text',
-          text: 'Cancel',
-        },
-        blocks: [
-          {
-            type: 'input',
-            block_id: 'leave_from_date',
-            label: {
-              type: 'plain_text',
-              text: 'Leave from (start date)',
-            },
-            element: {
-              type: 'datepicker',
-              action_id: 'value',
-              initial_date: defaultFrom,
-            },
+      // Open Slack modal
+      await slackClient.views.open({
+        trigger_id: triggerId,
+        view: {
+          type: 'modal',
+          callback_id: 'leave_request_modal',
+          title: {
+            type: 'plain_text',
+            text: 'Leave Request',
           },
-          {
-            type: 'input',
-            block_id: 'leave_to_date',
-            label: {
-              type: 'plain_text',
-              text: 'Leave to (end date)',
-            },
-            element: {
-              type: 'datepicker',
-              action_id: 'value',
-              initial_date: defaultTo,
-            },
+          submit: {
+            type: 'plain_text',
+            text: 'Submit',
           },
-          {
-            type: 'input',
-            block_id: 'leave_type',
-            label: {
-              type: 'plain_text',
-              text: 'Leave type',
-            },
-            element: {
-              type: 'static_select',
-              action_id: 'value',
-              placeholder: {
+          close: {
+            type: 'plain_text',
+            text: 'Cancel',
+          },
+          blocks: [
+            {
+              type: 'input',
+              block_id: 'leave_from_date',
+              label: {
                 type: 'plain_text',
-                text: 'Select type',
+                text: 'Leave from (start date)',
               },
-              options: [
-                { text: { type: 'plain_text', text: 'Sick' }, value: 'sick' },
-                { text: { type: 'plain_text', text: 'Casual' }, value: 'casual' },
-                { text: { type: 'plain_text', text: 'Annual' }, value: 'annual' },
-                { text: { type: 'plain_text', text: 'Half Day' }, value: 'half_day' },
-                { text: { type: 'plain_text', text: 'Work from Home' }, value: 'wfh' },
-              ],
+              element: {
+                type: 'datepicker',
+                action_id: 'value',
+                initial_date: defaultFrom,
+              },
             },
-          },
-          {
-            type: 'input',
-            block_id: 'reason',
-            label: {
-              type: 'plain_text',
-              text: 'Reason',
+            {
+              type: 'input',
+              block_id: 'leave_to_date',
+              label: {
+                type: 'plain_text',
+                text: 'Leave to (end date)',
+              },
+              element: {
+                type: 'datepicker',
+                action_id: 'value',
+                initial_date: defaultTo,
+              },
             },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'value',
-              multiline: true,
+            {
+              type: 'input',
+              block_id: 'leave_type',
+              label: {
+                type: 'plain_text',
+                text: 'Leave type',
+              },
+              element: {
+                type: 'static_select',
+                action_id: 'value',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select type',
+                },
+                options: [
+                  { text: { type: 'plain_text', text: 'Sick' }, value: 'sick' },
+                  { text: { type: 'plain_text', text: 'Casual' }, value: 'casual' },
+                  { text: { type: 'plain_text', text: 'Annual' }, value: 'annual' },
+                  { text: { type: 'plain_text', text: 'Half Day' }, value: 'half_day' },
+                  { text: { type: 'plain_text', text: 'Work from Home' }, value: 'wfh' },
+                ],
+              },
             },
-          },
-        ],
-      },
-    })
+            {
+              type: 'input',
+              block_id: 'reason',
+              label: {
+                type: 'plain_text',
+                text: 'Reason',
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+                multiline: true,
+              },
+            },
+          ],
+        },
+      })
 
-    // Respond quickly (Slack just needs 200 OK)
-    return new NextResponse('', { status: 200 })
+      // Respond quickly (Slack just needs 200 OK)
+      return new NextResponse('', { status: 200 })
+    }
+
+    // Handle /daily-report command
+    if (command === '/daily-report') {
+      await slackClient.views.open({
+        trigger_id: triggerId,
+        view: {
+          type: 'modal',
+          callback_id: 'daily_report_modal',
+          title: {
+            type: 'plain_text',
+            text: 'Daily Report',
+          },
+          submit: {
+            type: 'plain_text',
+            text: 'Submit',
+          },
+          close: {
+            type: 'plain_text',
+            text: 'Cancel',
+          },
+          blocks: [
+            {
+              type: 'input',
+              block_id: 'dr_project_name',
+              label: {
+                type: 'plain_text',
+                text: 'Project Name',
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'dr_hours',
+              label: {
+                type: 'plain_text',
+                text: 'Hours',
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'dr_reporting_to',
+              label: {
+                type: 'plain_text',
+                text: 'Reporting To',
+              },
+              element: {
+                type: 'multi_users_select',
+                action_id: 'value',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select reporting managers',
+                },
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'dr_progress',
+              label: {
+                type: 'plain_text',
+                text: 'Progress / Tasks done today',
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+                multiline: true,
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'dr_tomorrow',
+              label: {
+                type: 'plain_text',
+                text: "Tomorrow's plan (optional)",
+              },
+              optional: true,
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+                multiline: true,
+              },
+            },
+          ],
+        },
+      })
+
+      // Respond quickly (Slack just needs 200 OK)
+      return new NextResponse('', { status: 200 })
+    }
+
+    // Unknown command
+    return NextResponse.json(
+      { error: `Unknown command: ${command}` },
+      { status: 400 }
+    )
   } catch (err) {
     console.error('Error in /api/slack/commands', err)
     return new NextResponse('Server error', { status: 500 })

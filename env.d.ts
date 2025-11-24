@@ -17,6 +17,7 @@ declare namespace NodeJS {
     SLACK_BOT_TOKEN: string
     SLACK_SIGNING_SECRET: string
     SLACK_LEAVE_CHANNEL_ID: string // Channel ID where leave requests are posted
+    SLACK_DAILY_REPORT_CHANNEL_ID?: string // Channel ID where daily reports are posted
 
     // Google Sheets configuration
     // Option 1: New format (preferred)
