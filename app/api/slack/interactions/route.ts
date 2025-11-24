@@ -36,7 +36,8 @@ export async function POST(req: NextRequest) {
       const state = payload.view.state.values
 
       // Based on your logged payload structure
-      const leaveDate: string = state.leave_date.value.selected_date
+      const fromDate: string = state.leave_from_date.value.selected_date
+      const toDate: string = state.leave_to_date.value.selected_date
       const leaveType: string = state.leave_type.value.selected_option.value
       const reason: string = state.reason.value.value
       const slackUserId: string = payload.user.id
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `*New leave request*\n*Employee:* <@${slackUserId}> (${employeeName})\n*Date:* ${leaveDate}\n*Type:* ${leaveType}\n*Reason:* ${reason}`,
+              text: `*New leave request*\n*Employee:* <@${slackUserId}> (${employeeName})\n*Dates:* ${fromDate} → ${toDate}\n*Type:* ${leaveType}\n*Reason:* ${reason}`,
             },
           },
           {
@@ -104,7 +105,8 @@ export async function POST(req: NextRequest) {
         timestamp: nowIso,
         slackUserId,
         employeeName,
-        leaveDate,
+        fromDate,
+        toDate,
         leaveType,
         reason,
         status: 'Pending',

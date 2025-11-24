@@ -22,10 +22,12 @@ export async function POST(req: NextRequest) {
       return new NextResponse('Missing trigger_id', { status: 400 })
     }
 
-    // Default leave date = tomorrow in YYYY-MM-DD
+    // Default leave dates = tomorrow in YYYY-MM-DD
     const today = new Date()
     today.setDate(today.getDate() + 1)
-    const defaultDate = today.toISOString().slice(0, 10)
+    const defaultFrom = today.toISOString().slice(0, 10)
+    // default To = same as From for now
+    const defaultTo = defaultFrom
 
     // Open Slack modal
     await slackClient.views.open({
@@ -48,15 +50,28 @@ export async function POST(req: NextRequest) {
         blocks: [
           {
             type: 'input',
-            block_id: 'leave_date',
+            block_id: 'leave_from_date',
             label: {
               type: 'plain_text',
-              text: 'Leave date',
+              text: 'Leave from (start date)',
             },
             element: {
               type: 'datepicker',
               action_id: 'value',
-              initial_date: defaultDate,
+              initial_date: defaultFrom,
+            },
+          },
+          {
+            type: 'input',
+            block_id: 'leave_to_date',
+            label: {
+              type: 'plain_text',
+              text: 'Leave to (end date)',
+            },
+            element: {
+              type: 'datepicker',
+              action_id: 'value',
+              initial_date: defaultTo,
             },
           },
           {

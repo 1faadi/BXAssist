@@ -25,22 +25,24 @@ const sheets = google.sheets({ version: 'v4', auth })
  * A Timestamp
  * B SlackUserId
  * C EmployeeName
- * D LeaveDate
- * E LeaveType
- * F Reason
- * G Status
- * H Manager1ApprovedBy
- * I Manager1ApprovedAt
- * J Manager2ApprovedBy
- * K Manager2ApprovedAt
- * L SlackMessageTs
- * M SlackChannelId
+ * D FromDate
+ * E ToDate
+ * F LeaveType
+ * G Reason
+ * H Status
+ * I Manager1ApprovedBy
+ * J Manager1ApprovedAt
+ * K Manager2ApprovedBy
+ * L Manager2ApprovedAt
+ * M SlackMessageTs
+ * N SlackChannelId
  */
 export async function appendLeaveRequestRow(params: {
   timestamp: string
   slackUserId: string
   employeeName: string
-  leaveDate: string
+  fromDate: string
+  toDate: string
   leaveType: string
   reason: string
   status: string
@@ -51,7 +53,8 @@ export async function appendLeaveRequestRow(params: {
     timestamp,
     slackUserId,
     employeeName,
-    leaveDate,
+    fromDate,
+    toDate,
     leaveType,
     reason,
     status,
@@ -69,16 +72,17 @@ export async function appendLeaveRequestRow(params: {
           timestamp, // A
           slackUserId, // B
           employeeName, // C
-          leaveDate, // D
-          leaveType, // E
-          reason, // F
-          status, // G
-          '', // H Manager1ApprovedBy
-          '', // I Manager1ApprovedAt
-          '', // J Manager2ApprovedBy
-          '', // K Manager2ApprovedAt
-          slackMessageTs, // L
-          slackChannelId, // M
+          fromDate, // D
+          toDate, // E
+          leaveType, // F
+          reason, // G
+          status, // H
+          '', // I Manager1ApprovedBy
+          '', // J Manager1ApprovedAt
+          '', // K Manager2ApprovedBy
+          '', // L Manager2ApprovedAt
+          slackMessageTs, // M
+          slackChannelId, // N
         ],
       ],
     },
@@ -98,7 +102,7 @@ export async function updateLeaveRequestApproval(args: {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'LeaveRequests!A2:M1000', // skip header
+    range: 'LeaveRequests!A2:N1000', // now A–N
   })
 
   const rows = res.data.values || []
@@ -107,8 +111,8 @@ export async function updateLeaveRequestApproval(args: {
   let row: string[] | undefined
 
   rows.forEach((r, idx) => {
-    const ts = r[11] // SlackMessageTs (L)
-    const ch = r[12] // SlackChannelId (M)
+    const ts = r[12] // SlackMessageTs (M)
+    const ch = r[13] // SlackChannelId (N)
     if (ts === messageTs && ch === channelId) {
       foundRowIndex = idx + 2 // because data starts at row 2
       row = r
@@ -119,14 +123,15 @@ export async function updateLeaveRequestApproval(args: {
     throw new Error('Leave request row not found in sheet')
   }
 
-  // Ensure row has all 13 columns
-  while (row.length < 13) row.push('')
+  // Ensure row has all 14 columns
+  while (row.length < 14) row.push('')
 
-  let status = row[6] || 'Pending'
-  let m1By = row[7] || ''
-  let m1At = row[8] || ''
-  let m2By = row[9] || ''
-  let m2At = row[10] || ''
+  // indexes with new layout:
+  let status = row[7] || 'Pending'
+  let m1By = row[8] || ''
+  let m1At = row[9] || ''
+  let m2By = row[10] || ''
+  let m2At = row[11] || ''
 
   const nowIso = new Date().toISOString()
 
@@ -155,15 +160,15 @@ export async function updateLeaveRequestApproval(args: {
     status = 'Pending'
   }
 
-  row[6] = status
-  row[7] = m1By
-  row[8] = m1At
-  row[9] = m2By
-  row[10] = m2At
+  row[7] = status
+  row[8] = m1By
+  row[9] = m1At
+  row[10] = m2By
+  row[11] = m2At
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: `LeaveRequests!A${foundRowIndex}:M${foundRowIndex}`,
+    range: `LeaveRequests!A${foundRowIndex}:N${foundRowIndex}`, // A–N
     valueInputOption: 'RAW',
     requestBody: {
       values: [row],
