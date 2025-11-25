@@ -264,7 +264,7 @@ export default function ReminderSettingsPage() {
             When a user checks in, their scheduled reminder is automatically cancelled.
           </li>
           <li>
-            Only users who haven't checked in will receive the reminder at the configured time.
+            Only users who haven&apos;t checked in will receive the reminder at the configured time.
           </li>
           <li>
             Reminder time is stored in Google Sheets Settings tab and can be changed from this
