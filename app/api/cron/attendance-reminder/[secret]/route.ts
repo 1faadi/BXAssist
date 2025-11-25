@@ -1,20 +1,20 @@
-/**
- * Daily Attendance Reminder Cron Endpoint
- * 
- * Sends DM reminders at configured time (default 9:10 AM PKT) to users who haven't checked in.
- * 
- * Scheduled via Vercel Cron: "*/5 * * * 1-5" (every 5 minutes on weekdays)
- * 
- * Flow:
- * 1. Verify cron secret from path
- * 2. Read settings from Google Sheets (time, enabled, lastSentDate)
- * 3. Check if reminders are enabled and if it's time to send
- * 4. Get today's date in PK time
- * 5. Read Attendance sheet for today's check-ins
- * 6. Get attendance channel members
- * 7. DM users who haven't checked in with check-in link
- * 8. Update lastSentDate in settings
- */
+// /**
+//  * Daily Attendance Reminder Cron Endpoint
+//  * 
+//  * Sends DM reminders at configured time (default 9:10 AM PKT) to users who haven't checked in.
+//  * 
+//  * Scheduled via Vercel Cron: "*/5 * * * 1-5" (every 5 minutes on weekdays)
+//  * 
+//  * Flow:
+//  * 1. Verify cron secret from path
+//  * 2. Read settings from Google Sheets (time, enabled, lastSentDate)
+//  * 3. Check if reminders are enabled and if it's time to send
+//  * 4. Get today's date in PK time
+//  * 5. Read Attendance sheet for today's check-ins
+//  * 6. Get attendance channel members
+//  * 7. DM users who haven't checked in with check-in link
+//  * 8. Update lastSentDate in settings
+//  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { slackClient } from '@/lib/slackClient'
