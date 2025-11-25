@@ -286,6 +286,35 @@ export async function POST(req: NextRequest) {
       const assignedByUserId: string = state.ot_assigned_by.value.selected_user
       const reason: string = state.ot_reason?.value?.value ?? ''
 
+      // Parse and validate hours/minutes
+      const hoursRaw = state.ot_hours.value.value
+      const minutesRaw = state.ot_minutes?.value?.value ?? '0'
+      const hours = Number(hoursRaw)
+      const minutes = Number(minutesRaw)
+
+      // Validate hours
+      if (!Number.isFinite(hours) || hours < 0 || hours > 24) {
+        return NextResponse.json({
+          response_action: 'errors',
+          errors: {
+            ot_hours: 'Enter a valid hour (0-24)',
+          },
+        })
+      }
+
+      // Validate minutes
+      if (!Number.isFinite(minutes) || minutes < 0 || minutes > 59) {
+        return NextResponse.json({
+          response_action: 'errors',
+          errors: {
+            ot_minutes: 'Enter valid minutes (0-59)',
+          },
+        })
+      }
+
+      // Compute display duration string
+      const durationText = `${hours}h ${minutes > 0 ? minutes + 'm' : ''}`.trim()
+
       const requesterId: string = payload.user.id
 
       // Get requester's display name (for Google Sheets only)
@@ -349,6 +378,10 @@ export async function POST(req: NextRequest) {
               },
               {
                 type: 'mrkdwn',
+                text: `*Duration:*\n${durationText}`,
+              },
+              {
+                type: 'mrkdwn',
                 text: `*Requested on:*\n${requestedTime} (PKT)`,
               },
             ],
@@ -387,6 +420,8 @@ export async function POST(req: NextRequest) {
         employeeName,
         projectName,
         assignedByUserId,
+        hours,
+        minutes,
         reason,
         status: 'Pending',
         slackMessageTs: ts,
@@ -411,7 +446,7 @@ export async function POST(req: NextRequest) {
                   type: 'section',
                   text: {
                     type: 'mrkdwn',
-                    text: `*Overtime Request*\n*Employee:* <@${requesterId}>\n*Project:* ${projectName}\n*Assigned by:* <@${assignedByUserId}>`,
+                    text: `*Overtime Request*\n*Employee:* <@${requesterId}>\n*Project:* ${projectName}\n*Assigned by:* <@${assignedByUserId}>\n*Duration:* ${durationText}`,
                   },
                 },
                 ...(reason
@@ -532,9 +567,23 @@ export async function POST(req: NextRequest) {
         } catch (error: any) {
           // If already decided, return ephemeral error
           if (error.message?.includes('already decided')) {
+            // Try to get existing status from the error or sheet
+            let existingStatus = 'decided'
+            try {
+              const existingResult = await setOvertimeDecision({
+                channelId,
+                messageTs,
+                decision: 'Approved', // dummy, won't update if already decided
+                decidedBy: approverName,
+              })
+              existingStatus = existingResult.status.toLowerCase()
+            } catch {
+              // Ignore
+            }
             return NextResponse.json({
-              response_action: 'ephemeral',
-              text: 'This overtime request has already been decided.',
+              response_type: 'ephemeral',
+              replace_original: true,
+              text: `⚠️ This overtime request is already ${existingStatus}.`,
             })
           }
           throw error
@@ -547,14 +596,20 @@ export async function POST(req: NextRequest) {
           requesterId,
           projectName,
           assignedByUserId,
+          hours,
+          minutes,
           reason,
         } = decisionResult
+
+        // Format duration text
+        const durationText = `${hours}h ${minutes > 0 ? minutes + 'm' : ''}`.trim()
 
         // Check if already decided (from sheet)
         if (status !== decision) {
           return NextResponse.json({
-            response_action: 'ephemeral',
-            text: `This overtime request has already been ${status.toLowerCase()}.`,
+            response_type: 'ephemeral',
+            replace_original: true,
+            text: `⚠️ This overtime request is already ${status.toLowerCase()}.`,
           })
         }
 
@@ -623,6 +678,10 @@ export async function POST(req: NextRequest) {
                   {
                     type: 'mrkdwn',
                     text: `*Assigned by:*\n<@${assignedByUserId}>`,
+                  },
+                  {
+                    type: 'mrkdwn',
+                    text: `*Duration:*\n${durationText}`,
                   },
                 ],
               },
@@ -695,6 +754,10 @@ export async function POST(req: NextRequest) {
                     },
                     {
                       type: 'mrkdwn',
+                      text: `*Duration:*\n${durationText}`,
+                    },
+                    {
+                      type: 'mrkdwn',
                       text: `*Time:*\n${decisionTime} (PKT)`,
                     },
                   ],
@@ -727,16 +790,27 @@ export async function POST(req: NextRequest) {
           console.warn(`Could not send DM to requester ${requesterId}:`, dmError)
         }
 
-        // Acknowledge the button click
+        // Replace ephemeral message with confirmation (no buttons)
         return NextResponse.json({
-          response_action: 'update',
+          response_type: 'ephemeral',
+          replace_original: true,
+          text: `✅ Decision saved: ${decision}.`,
           blocks: [
             {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: `✅ Overtime request ${status.toLowerCase()}. The requester has been notified.`,
+                text: `✅ *Decision saved:* *${decision}*`,
               },
+            },
+            {
+              type: 'context',
+              elements: [
+                {
+                  type: 'mrkdwn',
+                  text: `This request is now *${decision}* and the channel post has been updated.`,
+                },
+              ],
             },
           ],
         })

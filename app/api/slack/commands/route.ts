@@ -241,6 +241,39 @@ export async function POST(req: NextRequest) {
             },
             {
               type: 'input',
+              block_id: 'ot_hours',
+              label: {
+                type: 'plain_text',
+                text: 'Hours',
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'e.g. 2',
+                },
+              },
+            },
+            {
+              type: 'input',
+              optional: true,
+              block_id: 'ot_minutes',
+              label: {
+                type: 'plain_text',
+                text: 'Minutes (optional)',
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'e.g. 30 (default 0)',
+                },
+              },
+            },
+            {
+              type: 'input',
               block_id: 'ot_assigned_by',
               label: {
                 type: 'plain_text',
