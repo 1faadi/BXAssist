@@ -207,6 +207,76 @@ export async function POST(req: NextRequest) {
       return new NextResponse('', { status: 200 })
     }
 
+    // Handle /overtime-req command
+    if (command === '/overtime-req') {
+      await slackClient.views.open({
+        trigger_id: triggerId,
+        view: {
+          type: 'modal',
+          callback_id: 'overtime_request_modal',
+          title: {
+            type: 'plain_text',
+            text: 'Overtime Request',
+          },
+          submit: {
+            type: 'plain_text',
+            text: 'Submit',
+          },
+          close: {
+            type: 'plain_text',
+            text: 'Cancel',
+          },
+          blocks: [
+            {
+              type: 'input',
+              block_id: 'ot_project',
+              label: {
+                type: 'plain_text',
+                text: 'Project Name',
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'ot_assigned_by',
+              label: {
+                type: 'plain_text',
+                text: 'Assigned by',
+              },
+              element: {
+                type: 'users_select',
+                action_id: 'value',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select who assigned this overtime',
+                },
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'ot_reason',
+              optional: true,
+              label: {
+                type: 'plain_text',
+                text: 'Task / Reason (optional)',
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+                multiline: true,
+              },
+            },
+          ],
+        },
+      })
+
+      // Respond quickly (Slack just needs 200 OK)
+      return new NextResponse('', { status: 200 })
+    }
+
     // Handle /daily-report command
     if (command === '/daily-report') {
       await slackClient.views.open({
@@ -305,7 +375,7 @@ export async function POST(req: NextRequest) {
     // Unknown command
     return NextResponse.json({
       response_type: 'ephemeral',
-      text: `Unknown command: ${command}. Available commands: /check-in, /checkout, /leave-req, /daily-report`,
+      text: `Unknown command: ${command}. Available commands: /check-in, /checkout, /leave-req, /daily-report, /overtime-req`,
     })
   } catch (err) {
     console.error('Error in /api/slack/commands', err)

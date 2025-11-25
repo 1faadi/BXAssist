@@ -607,3 +607,166 @@ export async function markReminderStatus(args: {
     },
   })
 }
+
+/**
+ * Overtime Requests Tab Helpers
+ * 
+ * OvertimeRequests tab structure:
+ * A: Timestamp
+ * B: SlackUserId
+ * C: EmployeeName
+ * D: ProjectName
+ * E: AssignedByUserId
+ * F: Reason
+ * G: Status (Pending, Approved, Rejected)
+ * H: DecisionBy (approver display name)
+ * I: DecisionAt (ISO datetime)
+ * J: SlackMessageTs
+ * K: SlackChannelId
+ * Header row: A1="Timestamp", B1="SlackUserId", etc.
+ */
+
+/**
+ * Append a new overtime request row to Google Sheets
+ */
+export async function appendOvertimeRequestRow(args: {
+  timestamp: string
+  slackUserId: string
+  employeeName: string
+  projectName: string
+  assignedByUserId: string
+  reason: string
+  status: 'Pending' | 'Approved' | 'Rejected'
+  slackMessageTs: string
+  slackChannelId: string
+}): Promise<void> {
+  const {
+    timestamp,
+    slackUserId,
+    employeeName,
+    projectName,
+    assignedByUserId,
+    reason,
+    status,
+    slackMessageTs,
+    slackChannelId,
+  } = args
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'OvertimeRequests!A1',
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [
+        [
+          timestamp, // A: Timestamp
+          slackUserId, // B: SlackUserId
+          employeeName, // C: EmployeeName
+          projectName, // D: ProjectName
+          assignedByUserId, // E: AssignedByUserId
+          reason, // F: Reason
+          status, // G: Status
+          '', // H: DecisionBy (empty for new requests)
+          '', // I: DecisionAt (empty for new requests)
+          slackMessageTs, // J: SlackMessageTs
+          slackChannelId, // K: SlackChannelId
+        ],
+      ],
+    },
+  })
+}
+
+/**
+ * Set overtime decision (Approve or Reject) in Google Sheets
+ * 
+ * Finds the overtime request by channelId and messageTs, then updates:
+ * - Status (G) to "Approved" or "Rejected"
+ * - DecisionBy (H) to the approver's name
+ * - DecisionAt (I) to current ISO timestamp
+ * 
+ * Returns decision info plus requester details for DM notification.
+ * 
+ * Columns A-K: Timestamp | SlackUserId | EmployeeName | ProjectName | AssignedByUserId | Reason | Status | DecisionBy | DecisionAt | SlackMessageTs | SlackChannelId
+ */
+export async function setOvertimeDecision(args: {
+  channelId: string
+  messageTs: string
+  decision: 'Approved' | 'Rejected'
+  decidedBy: string // approver display name
+}): Promise<{
+  status: 'Approved' | 'Rejected'
+  decidedBy: string
+  decidedAt: string
+  requesterId: string
+  projectName: string
+  assignedByUserId: string
+  reason: string
+}> {
+  const { channelId, messageTs, decision, decidedBy } = args
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'OvertimeRequests!A2:K10000', // skip header, columns A-K
+  })
+
+  const rows = res.data.values || []
+
+  let foundRowIndex: number | null = null
+  let row: string[] | undefined
+
+  rows.forEach((r, idx) => {
+    const ts = r[9] // SlackMessageTs (J)
+    const ch = r[10] // SlackChannelId (K)
+    if (ts === messageTs && ch === channelId) {
+      foundRowIndex = idx + 2 // because data starts at row 2
+      row = r
+    }
+  })
+
+  if (!row || !foundRowIndex) {
+    throw new Error('Overtime request row not found in sheet')
+  }
+
+  // Ensure row has all 11 columns (A-K)
+  while (row.length < 11) row.push('')
+
+  // Check if already decided
+  if (row[6] === 'Approved' || row[6] === 'Rejected') {
+    // Return existing decision info
+    return {
+      status: row[6] as 'Approved' | 'Rejected',
+      decidedBy: row[7] || '',
+      decidedAt: row[8] || new Date().toISOString(),
+      requesterId: row[1], // SlackUserId (B)
+      projectName: row[3], // ProjectName (D)
+      assignedByUserId: row[4], // AssignedByUserId (E)
+      reason: row[5] || '', // Reason (F)
+    }
+  }
+
+  const decidedAt = new Date().toISOString()
+
+  // Update columns
+  row[6] = decision // Status (G)
+  row[7] = decidedBy // DecisionBy (H)
+  row[8] = decidedAt // DecisionAt (I)
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `OvertimeRequests!A${foundRowIndex}:K${foundRowIndex}`,
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [row],
+    },
+  })
+
+  return {
+    status: decision,
+    decidedBy,
+    decidedAt,
+    requesterId: row[1], // SlackUserId (B)
+    projectName: row[3], // ProjectName (D)
+    assignedByUserId: row[4], // AssignedByUserId (E)
+    reason: row[5] || '', // Reason (F)
+  }
+}

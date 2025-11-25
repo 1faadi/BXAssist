@@ -19,6 +19,8 @@ declare namespace NodeJS {
     SLACK_LEAVE_CHANNEL_ID: string // Channel ID where leave requests are posted
     SLACK_DAILY_REPORT_CHANNEL_ID?: string // Channel ID where daily reports are posted
     SLACK_ATTENDANCE_CHANNEL_ID?: string // Channel ID where attendance messages are posted
+    SLACK_OVERTIME_CHANNEL_ID?: string // Channel ID where overtime requests are posted
+    SLACK_OVERTIME_APPROVER_IDS?: string // Comma-separated list of admin user IDs who can approve overtime (e.g., "Uxxx,Uyyy,Uzzz")
 
     // Attendance security
     APP_BASE_URL: string // Base URL for generating signed attendance links (e.g., https://bx-assist.vercel.app)
