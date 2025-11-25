@@ -11,13 +11,12 @@
  * C: EmployeeName
  * D: FromDate
  * E: ToDate
- * F: LeaveType
- * G: Reason
- * H: Status (Pending, Approved, Rejected)
- * I: DecisionBy (manager name who decided)
- * J: DecisionAt (ISO datetime)
- * K: SlackMessageTs
- * L: SlackChannelId
+ * F: Reason
+ * G: Status (Pending, Approved, Rejected)
+ * H: DecisionBy (manager name who decided)
+ * I: DecisionAt (ISO datetime)
+ * J: SlackMessageTs
+ * K: SlackChannelId
  */
 
 import { google } from 'googleapis'
@@ -43,6 +42,8 @@ const sheets = google.sheets({ version: 'v4', auth })
  * Append a new leave request row to Google Sheets
  * 
  * Creates a new row with status "Pending" and empty DecisionBy/DecisionAt fields.
+ * 
+ * Columns A-K: Timestamp | SlackUserId | EmployeeName | FromDate | ToDate | Reason | Status | DecisionBy | DecisionAt | SlackMessageTs | SlackChannelId
  */
 export async function appendLeaveRequestRow(params: {
   timestamp: string
@@ -50,7 +51,6 @@ export async function appendLeaveRequestRow(params: {
   employeeName: string
   fromDate: string
   toDate: string
-  leaveType: string
   reason: string
   status: string // initially "Pending"
   slackMessageTs: string
@@ -62,7 +62,6 @@ export async function appendLeaveRequestRow(params: {
     employeeName,
     fromDate,
     toDate,
-    leaveType,
     reason,
     status,
     slackMessageTs,
@@ -76,18 +75,17 @@ export async function appendLeaveRequestRow(params: {
     requestBody: {
       values: [
         [
-          timestamp, // A
-          slackUserId, // B
-          employeeName, // C
-          fromDate, // D
-          toDate, // E
-          leaveType, // F
-          reason, // G
-          status, // H
-          '', // I DecisionBy (empty for new requests)
-          '', // J DecisionAt (empty for new requests)
-          slackMessageTs, // K
-          slackChannelId, // L
+          timestamp, // A: Timestamp
+          slackUserId, // B: SlackUserId
+          employeeName, // C: EmployeeName
+          fromDate, // D: FromDate
+          toDate, // E: ToDate
+          reason, // F: Reason
+          status, // G: Status
+          '', // H: DecisionBy (empty for new requests)
+          '', // I: DecisionAt (empty for new requests)
+          slackMessageTs, // J: SlackMessageTs
+          slackChannelId, // K: SlackChannelId
         ],
       ],
     },
@@ -98,21 +96,33 @@ export async function appendLeaveRequestRow(params: {
  * Set leave decision (Approve or Reject) in Google Sheets
  * 
  * Finds the leave request by channelId and messageTs, then updates:
- * - Status (H) to "Approved" or "Rejected"
- * - DecisionBy (I) to the manager's name
- * - DecisionAt (J) to current ISO timestamp
+ * - Status (G) to "Approved" or "Rejected"
+ * - DecisionBy (H) to the manager's name
+ * - DecisionAt (I) to current ISO timestamp
+ * 
+ * Returns decision info plus requester details for DM notification.
+ * 
+ * Columns A-K: Timestamp | SlackUserId | EmployeeName | FromDate | ToDate | Reason | Status | DecisionBy | DecisionAt | SlackMessageTs | SlackChannelId
  */
 export async function setLeaveDecision(args: {
   channelId: string
   messageTs: string
   decision: 'Approved' | 'Rejected'
   decidedBy: string // manager display name
-}): Promise<{ status: string; decidedBy: string; decidedAt: string }> {
+}): Promise<{
+  status: string
+  decidedBy: string
+  decidedAt: string
+  requesterId: string
+  fromDate: string
+  toDate: string
+  reason: string
+}> {
   const { channelId, messageTs, decision, decidedBy } = args
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'LeaveRequests!A2:L1000', // skip header, columns A-L
+    range: 'LeaveRequests!A2:K1000', // skip header, columns A-K
   })
 
   const rows = res.data.values || []
@@ -121,8 +131,8 @@ export async function setLeaveDecision(args: {
   let row: string[] | undefined
 
   rows.forEach((r, idx) => {
-    const ts = r[10] // SlackMessageTs (K)
-    const ch = r[11] // SlackChannelId (L)
+    const ts = r[9] // SlackMessageTs (J)
+    const ch = r[10] // SlackChannelId (K)
     if (ts === messageTs && ch === channelId) {
       foundRowIndex = idx + 2 // because data starts at row 2
       row = r
@@ -133,26 +143,39 @@ export async function setLeaveDecision(args: {
     throw new Error('Leave request row not found in sheet')
   }
 
-  // Ensure row has all 12 columns
-  while (row.length < 12) row.push('')
+  // Ensure row has all 11 columns (A-K)
+  while (row.length < 11) row.push('')
+
+  // Check if already decided
+  if (row[6] === 'Approved' || row[6] === 'Rejected') {
+    throw new Error('This leave is already decided.')
+  }
 
   const decidedAt = new Date().toISOString()
 
   // Update columns
-  row[7] = decision // Status (H)
-  row[8] = decidedBy // DecisionBy (I)
-  row[9] = decidedAt // DecisionAt (J)
+  row[6] = decision // Status (G)
+  row[7] = decidedBy // DecisionBy (H)
+  row[8] = decidedAt // DecisionAt (I)
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: `LeaveRequests!A${foundRowIndex}:L${foundRowIndex}`,
+    range: `LeaveRequests!A${foundRowIndex}:K${foundRowIndex}`,
     valueInputOption: 'RAW',
     requestBody: {
       values: [row],
     },
   })
 
-  return { status: decision, decidedBy, decidedAt }
+  return {
+    status: decision,
+    decidedBy,
+    decidedAt,
+    requesterId: row[1], // SlackUserId (B)
+    fromDate: row[3], // FromDate (D)
+    toDate: row[4], // ToDate (E)
+    reason: row[5], // Reason (F)
+  }
 }
 
 /**

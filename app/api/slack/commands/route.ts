@@ -188,29 +188,6 @@ export async function POST(req: NextRequest) {
             },
             {
               type: 'input',
-              block_id: 'leave_type',
-              label: {
-                type: 'plain_text',
-                text: 'Leave type',
-              },
-              element: {
-                type: 'static_select',
-                action_id: 'value',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'Select type',
-                },
-                options: [
-                  { text: { type: 'plain_text', text: 'Sick' }, value: 'sick' },
-                  { text: { type: 'plain_text', text: 'Casual' }, value: 'casual' },
-                  { text: { type: 'plain_text', text: 'Annual' }, value: 'annual' },
-                  { text: { type: 'plain_text', text: 'Half Day' }, value: 'half_day' },
-                  { text: { type: 'plain_text', text: 'Work from Home' }, value: 'wfh' },
-                ],
-              },
-            },
-            {
-              type: 'input',
               block_id: 'reason',
               label: {
                 type: 'plain_text',
