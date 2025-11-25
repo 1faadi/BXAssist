@@ -23,9 +23,7 @@ import { slackClient } from '@/lib/slackClient'
 import {
   appendLeaveRequestRow,
   setLeaveDecision,
-  appendOvertimeRequestRow,
   setOvertimeDecision,
-  addOvertimeApproverMessage,
   getOvertimeApproverMessages,
   markOvertimeApproverMessagesClosed,
 } from '@/lib/googleSheets'
@@ -289,269 +287,60 @@ export async function POST(req: NextRequest) {
     ) {
       const state = payload.view.state.values
 
-      // Extract form values
-      const projectName: string = state.ot_project.value.value
-      const assignedByUserId: string = state.ot_assigned_by.value.selected_user
-      const reason: string = state.ot_reason?.value?.value ?? ''
-
-      // Parse and validate hours/minutes
-      const hoursRaw = state.ot_hours.value.value
+      // Extract and validate form values quickly
+      const projectName = state.ot_project.value.value?.trim() ?? ''
+      const hoursRaw = state.ot_hours.value.value ?? ''
       const minutesRaw = state.ot_minutes?.value?.value ?? '0'
+      const assignedByUserId = state.ot_assigned_by.value.selected_user ?? ''
+      const reason = state.ot_reason?.value?.value?.trim() ?? ''
+
       const hours = Number(hoursRaw)
       const minutes = Number(minutesRaw)
 
-      // Validate hours
+      // Validate and return errors if invalid (Slack will keep modal open)
+      const errors: Record<string, string> = {}
+      if (!projectName) errors.ot_project = 'Project is required'
       if (!Number.isFinite(hours) || hours < 0 || hours > 24) {
-        return NextResponse.json({
-          response_action: 'errors',
-          errors: {
-            ot_hours: 'Enter a valid hour (0-24)',
-          },
-        })
+        errors.ot_hours = 'Hours must be 0–24'
       }
-
-      // Validate minutes
       if (!Number.isFinite(minutes) || minutes < 0 || minutes > 59) {
-        return NextResponse.json({
-          response_action: 'errors',
-          errors: {
-            ot_minutes: 'Enter valid minutes (0-59)',
+        errors.ot_minutes = 'Minutes must be 0–59'
+      }
+      if (!assignedByUserId) errors.ot_assigned_by = 'Select who assigned'
+
+      if (Object.keys(errors).length > 0) {
+        return NextResponse.json({ response_action: 'errors', errors })
+      }
+
+      // Kick off background processing via internal job endpoint (DON'T await)
+      const appBaseUrl = process.env.APP_BASE_URL
+      const jobsSecret = process.env.JOBS_SECRET
+
+      if (appBaseUrl && jobsSecret) {
+        void fetch(`${appBaseUrl}/api/jobs/overtime`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${jobsSecret}`,
           },
+          body: JSON.stringify({
+            requesterId: payload.user.id,
+            requesterName: payload.user.username,
+            projectName,
+            hours,
+            minutes,
+            assignedByUserId,
+            reason,
+          }),
+        }).catch((error) => {
+          console.error('Failed to trigger overtime job:', error)
         })
+      } else {
+        console.error('APP_BASE_URL or JOBS_SECRET not configured')
       }
 
-      // Compute display duration string
-      const durationText = `${hours}h ${minutes > 0 ? minutes + 'm' : ''}`.trim()
-
-      const requesterId: string = payload.user.id
-
-      // Get requester's display name (for Google Sheets only)
-      const requesterInfo = await slackClient.users.info({ user: requesterId })
-      const employeeName =
-        (requesterInfo.user?.profile as any)?.real_name ||
-        (requesterInfo.user?.profile as any)?.display_name ||
-        payload.user.username ||
-        requesterId
-
-      // Get overtime channel ID
-      const overtimeChannelId = process.env.SLACK_OVERTIME_CHANNEL_ID
-      if (!overtimeChannelId) {
-        return NextResponse.json(
-          {
-            response_action: 'errors',
-            errors: {
-              ot_project: 'Overtime channel not configured. Please contact admin.',
-            },
-          },
-          { status: 500 }
-        )
-      }
-
-      // Format requested time in PK timezone
-      const requestedTime = new Date().toLocaleString('en-GB', {
-        timeZone: 'Asia/Karachi',
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-
-      // Post main message to overtime channel (NO buttons)
-      const message = await slackClient.chat.postMessage({
-        channel: overtimeChannelId,
-        text: `⏱️ Overtime Request from <@${requesterId}>`, // fallback
-        blocks: [
-          {
-            type: 'header',
-            text: {
-              type: 'plain_text',
-              text: '⏱️ Overtime Request',
-            },
-          },
-          {
-            type: 'section',
-            fields: [
-              {
-                type: 'mrkdwn',
-                text: `*Employee:*\n<@${requesterId}>`,
-              },
-              {
-                type: 'mrkdwn',
-                text: `*Project:*\n${projectName}`,
-              },
-              {
-                type: 'mrkdwn',
-                text: `*Assigned by:*\n<@${assignedByUserId}>`,
-              },
-              {
-                type: 'mrkdwn',
-                text: `*Duration:*\n${durationText}`,
-              },
-              {
-                type: 'mrkdwn',
-                text: `*Requested on:*\n${requestedTime} (PKT)`,
-              },
-            ],
-          },
-          ...(reason
-            ? ([
-                {
-                  type: 'section',
-                  text: {
-                    type: 'mrkdwn',
-                    text: `*Task / Reason:*\n${reason}`,
-                  },
-                },
-              ] as any[])
-            : []),
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: '*Status:* Pending',
-              },
-            ],
-          },
-        ],
-      })
-
-      const ts = message.ts as string
-      const channelId = message.channel as string
-      const nowIso = new Date().toISOString()
-
-      // Save to Google Sheets
-      await appendOvertimeRequestRow({
-        timestamp: nowIso,
-        slackUserId: requesterId,
-        employeeName,
-        projectName,
-        assignedByUserId,
-        hours,
-        minutes,
-        reason,
-        status: 'Pending',
-        slackMessageTs: ts,
-        slackChannelId: channelId,
-      })
-
-      // Send DM messages to approvers with buttons
-      const approverIds = (process.env.SLACK_OVERTIME_APPROVER_IDS ?? '')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-
-      const requestKey = `${channelId}:${ts}`
-
-      if (approverIds.length > 0) {
-        for (const approverId of approverIds) {
-          try {
-            // Open DM channel
-            const dmResponse = await slackClient.conversations.open({
-              users: approverId,
-            })
-
-            if (!dmResponse.channel?.id) {
-              console.warn(`Could not open DM with approver ${approverId}`)
-              continue
-            }
-
-            const imChannelId = dmResponse.channel.id
-
-            // Send DM with buttons
-            const dmMessage = await slackClient.chat.postMessage({
-              channel: imChannelId,
-              text: 'Overtime approval requested',
-              blocks: [
-                {
-                  type: 'header',
-                  text: {
-                    type: 'plain_text',
-                    text: '⏱️ Overtime Approval',
-                  },
-                },
-                {
-                  type: 'section',
-                  fields: [
-                    {
-                      type: 'mrkdwn',
-                      text: `*Employee:*\n<@${requesterId}>`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Project:*\n${projectName}`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Assigned by:*\n<@${assignedByUserId}>`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Duration:*\n${durationText}`,
-                    },
-                  ],
-                },
-                ...(reason
-                  ? ([
-                      {
-                        type: 'section',
-                        text: {
-                          type: 'mrkdwn',
-                          text: `*Task / Reason:*\n${reason}`,
-                        },
-                      },
-                    ] as any[])
-                  : []),
-                {
-                  type: 'actions',
-                  elements: [
-                    {
-                      type: 'button',
-                      style: 'primary',
-                      text: {
-                        type: 'plain_text',
-                        text: 'Approve',
-                      },
-                      action_id: 'ot_approve',
-                      value: JSON.stringify({ reqKey: requestKey }),
-                    },
-                    {
-                      type: 'button',
-                      style: 'danger',
-                      text: {
-                        type: 'plain_text',
-                        text: 'Reject',
-                      },
-                      action_id: 'ot_reject',
-                      value: JSON.stringify({ reqKey: requestKey }),
-                    },
-                  ],
-                },
-              ] as any,
-            })
-
-            // Store DM message info in Google Sheets
-            await addOvertimeApproverMessage({
-              requestKey,
-              approverUserId: approverId,
-              imChannelId,
-              messageTs: dmMessage.ts as string,
-            })
-
-            // Small delay to avoid rate limits
-            if (approverIds.indexOf(approverId) < approverIds.length - 1) {
-              await new Promise((resolve) => setTimeout(resolve, 150))
-            }
-          } catch (dmError) {
-            // Ignore errors for individual approvers
-            console.warn(`Could not send DM to approver ${approverId}:`, dmError)
-          }
-        }
-      }
-
-      // Close modal
-      return NextResponse.json({ response_action: 'clear' })
+      // ✅ Important: return immediately so Slack closes the modal
+      return new NextResponse('', { status: 200 })
     }
 
     // 3) Handle button clicks (Approve/Reject)

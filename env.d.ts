@@ -28,6 +28,7 @@ declare namespace NodeJS {
     ATTENDANCE_SIGNING_SECRET?: string // Secret for signing attendance URLs
     CRON_SECRET?: string // Secret for securing cron endpoints
     ADMIN_KEY?: string // Secret for securing admin pages and API routes
+    JOBS_SECRET?: string // Secret for securing background job endpoints
 
     // Google Sheets configuration
     // Option 1: New format (preferred)
