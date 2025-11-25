@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
         payload.user.username ||
         slackUserId
 
-      // Post message in card format (similar to check-in/out) - NO buttons in main message
+      // Post message in card format (similar to check-in/out) with Approve/Reject buttons
       const message = await slackClient.chat.postMessage({
         channel: LEAVE_CHANNEL_ID,
         text: `📝 Leave Request from <@${slackUserId}>`, // fallback
@@ -105,6 +105,30 @@ export async function POST(req: NextRequest) {
               },
             ],
           },
+          {
+            type: 'actions',
+            block_id: 'leave_decision',
+            elements: [
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Approve',
+                },
+                style: 'primary',
+                action_id: 'leave_approve',
+              },
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Reject',
+                },
+                style: 'danger',
+                action_id: 'leave_reject',
+              },
+            ],
+          },
         ],
       })
 
@@ -124,70 +148,6 @@ export async function POST(req: NextRequest) {
         slackMessageTs: ts,
         slackChannelId: channelId,
       })
-
-      // Send ephemeral message to approvers with buttons
-      // TODO: Add logic here to identify approvers (e.g., channel members with manager role)
-      // For now, we'll send ephemeral to a specific manager or all channel members
-      // You can customize this based on your approver-visibility rules
-      try {
-        // Get channel members to send ephemeral to approvers
-        const membersResponse = await slackClient.conversations.members({
-          channel: LEAVE_CHANNEL_ID,
-        })
-        const members = membersResponse.members || []
-
-        // Send ephemeral message with buttons to each member (they'll only see it if they're approvers)
-        // In production, you might want to filter to only managers/approvers
-        for (const memberId of members) {
-          try {
-            await slackClient.chat.postEphemeral({
-              channel: LEAVE_CHANNEL_ID,
-              user: memberId,
-              text: 'Leave request pending approval',
-              blocks: [
-                {
-                  type: 'section',
-                  text: {
-                    type: 'mrkdwn',
-                    text: `New leave request from <@${slackUserId}> (${fromDate} → ${toDate})`,
-                  },
-                },
-                {
-                  type: 'actions',
-                  block_id: 'leave_decision',
-                  elements: [
-                    {
-                      type: 'button',
-                      text: {
-                        type: 'plain_text',
-                        text: 'Approve',
-                      },
-                      style: 'primary',
-                      action_id: 'leave_approve',
-                      value: JSON.stringify({ channelId, messageTs: ts }),
-                    },
-                    {
-                      type: 'button',
-                      text: {
-                        type: 'plain_text',
-                        text: 'Reject',
-                      },
-                      style: 'danger',
-                      action_id: 'leave_reject',
-                      value: JSON.stringify({ channelId, messageTs: ts }),
-                    },
-                  ],
-                },
-              ],
-            })
-          } catch (ephemeralError) {
-            // Ignore errors for individual members (e.g., bot can't DM itself)
-            console.warn(`Could not send ephemeral to ${memberId}:`, ephemeralError)
-          }
-        }
-      } catch (membersError) {
-        console.warn('Could not get channel members for ephemeral:', membersError)
-      }
 
       // Close modal
       return NextResponse.json({ response_action: 'clear' })
@@ -326,25 +286,11 @@ export async function POST(req: NextRequest) {
       const decision: 'Approved' | 'Rejected' =
         action.action_id === 'leave_approve' ? 'Approved' : 'Rejected'
 
-      // Get channel/ts from button value or payload
-      let channelId: string
-      let messageTs: string
-
-      if (action.value) {
-        // Try to parse from button value
-        try {
-          const valueData = JSON.parse(action.value)
-          channelId = valueData.channelId
-          messageTs = valueData.messageTs
-        } catch {
-          // Fallback to payload
-          channelId = payload.container?.channel_id || payload.channel?.id || ''
-          messageTs = payload.container?.message_ts || payload.message?.ts || ''
-        }
-      } else {
-        channelId = payload.container?.channel_id || payload.channel?.id || ''
-        messageTs = payload.container?.message_ts || payload.message?.ts || ''
-      }
+      // Get channel/ts from payload (buttons are in main message)
+      const channelId: string =
+        payload.container?.channel_id || payload.channel?.id || ''
+      const messageTs: string =
+        payload.container?.message_ts || payload.message?.ts || ''
 
       if (!channelId || !messageTs) {
         return new NextResponse('Missing channel/ts', { status: 400 })
@@ -405,24 +351,30 @@ export async function POST(req: NextRequest) {
         console.warn('Could not fetch original message:', error)
       }
 
-      // Build updated blocks for main channel message
+      // Build updated blocks for main channel message (remove buttons after decision)
       const updatedBlocks = originalMessage?.blocks
-        ? (originalMessage.blocks as any[]).map((block: any) => {
-            if (block.type === 'context') {
-              // Update status line with decision info
-              const decisionTime = new Date(decidedAt).toLocaleString()
-              return {
-                ...block,
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: `*Status:* ${status} by ${decidedBy} at ${decisionTime}`,
-                  },
-                ],
+        ? (originalMessage.blocks as any[])
+            .map((block: any) => {
+              if (block.type === 'context') {
+                // Update status line with decision info
+                const decisionTime = new Date(decidedAt).toLocaleString()
+                return {
+                  ...block,
+                  elements: [
+                    {
+                      type: 'mrkdwn',
+                      text: `*Status:* ${status} by ${decidedBy} at ${decisionTime}`,
+                    },
+                  ],
+                }
               }
-            }
-            return block
-          })
+              // Remove the actions block (buttons) after decision
+              if (block.type === 'actions' && block.block_id === 'leave_decision') {
+                return null
+              }
+              return block
+            })
+            .filter(Boolean) // Remove null blocks
         : [
             {
               type: 'header',
