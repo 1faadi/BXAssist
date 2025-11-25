@@ -25,7 +25,6 @@ declare namespace NodeJS {
     OFFICE_IP_ALLOWLIST?: string // Comma-separated list of public office IP addresses
     ATTENDANCE_SIGNING_SECRET?: string // Secret for signing attendance URLs
     CRON_SECRET?: string // Secret for securing cron endpoints
-    ADMIN_SECRET?: string // Secret for accessing admin pages
 
     // Google Sheets configuration
     // Option 1: New format (preferred)

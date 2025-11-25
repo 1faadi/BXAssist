@@ -1,49 +1,26 @@
-// /**
-//  * Daily Attendance Reminder Cron Endpoint
-//  * 
-//  * Sends DM reminders at configured time (default 9:10 AM PKT) to users who haven't checked in.
-//  * 
-//  * Scheduled via Vercel Cron: "*/5 * * * 1-5" (every 5 minutes on weekdays)
-//  * 
-//  * Flow:
-//  * 1. Verify cron secret from path
-//  * 2. Read settings from Google Sheets (time, enabled, lastSentDate)
-//  * 3. Check if reminders are enabled and if it's time to send
-//  * 4. Get today's date in PK time
-//  * 5. Read Attendance sheet for today's check-ins
-//  * 6. Get attendance channel members
-//  * 7. DM users who haven't checked in with check-in link
-//  * 8. Update lastSentDate in settings
-//  */
+/**
+ * Daily Attendance Reminder Cron Endpoint
+ * 
+ * Sends DM reminders at 9:10 AM PKT (04:10 UTC) to users who haven't checked in.
+ * 
+ * Scheduled via Vercel Cron: "10 4 * * 1-5" (weekdays at 04:10 UTC)
+ * 
+ * Flow:
+ * 1. Verify cron secret from path
+ * 2. Get today's date in PK time
+ * 3. Read Attendance sheet for today's check-ins
+ * 4. Get attendance channel members
+ * 5. DM users who haven't checked in with check-in link
+ */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { slackClient } from '@/lib/slackClient'
 import { getValues } from '@/lib/googleSheets'
 import { generateSignedAttendanceUrl } from '@/lib/attendanceSecurity'
 import { nowPk } from '@/lib/timePk'
-import {
-  getAttendanceReminderSettings,
-  setAttendanceReminderLastSentDate,
-} from '@/lib/settingsSheets'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
-
-/**
- * Check if current time matches the configured reminder time (within 5-minute window)
- */
-function isTimeToSend(configuredTime: string, currentTime: string): boolean {
-  const [configHour, configMin] = configuredTime.split(':').map(Number)
-  const [currentHour, currentMin] = currentTime.split(':').map(Number)
-
-  // Check if we're within the 5-minute window
-  // e.g., if configured is 09:10, we send between 09:10 and 09:14
-  if (currentHour !== configHour) {
-    return false
-  }
-
-  return currentMin >= configMin && currentMin < configMin + 5
-}
 
 export async function GET(
   req: NextRequest,
@@ -57,48 +34,6 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Check for force parameter (for testing)
-    const url = new URL(req.url)
-    const force = url.searchParams.get('force') === '1'
-
-    // Get settings from Google Sheets
-    const settings = await getAttendanceReminderSettings()
-
-    // Check if reminders are enabled
-    if (!settings.enabled && !force) {
-      return NextResponse.json({
-        success: true,
-        message: 'Reminders are disabled',
-        skipped: true,
-      })
-    }
-
-    // Get current PK time
-    const { datePk, timePkHHmm } = nowPk()
-
-    // Check if it's time to send (unless forced)
-    if (!force) {
-      if (!isTimeToSend(settings.timeHHmm, timePkHHmm)) {
-        return NextResponse.json({
-          success: true,
-          message: `Not time yet. Configured: ${settings.timeHHmm}, Current: ${timePkHHmm}`,
-          skipped: true,
-          configuredTime: settings.timeHHmm,
-          currentTime: timePkHHmm,
-        })
-      }
-
-      // Check if already sent today (skip this check when force=1 for testing)
-      if (settings.lastSentDate === datePk) {
-        return NextResponse.json({
-          success: true,
-          message: 'Reminders already sent today',
-          skipped: true,
-          lastSentDate: settings.lastSentDate,
-        })
-      }
-    }
-
     const attendanceChannelId = process.env.SLACK_ATTENDANCE_CHANNEL_ID
     if (!attendanceChannelId) {
       console.error('SLACK_ATTENDANCE_CHANNEL_ID is not set')
@@ -107,6 +42,9 @@ export async function GET(
         { status: 500 }
       )
     }
+
+    // Get today's date in PK time
+    const { datePk } = nowPk()
 
     // Read Attendance sheet for today's check-ins
     const attendanceRows = await getValues('Attendance!A2:H10000')
@@ -239,21 +177,13 @@ export async function GET(
       }
     }
 
-    // Update last sent date if we sent any reminders
-    if (successCount > 0) {
-      await setAttendanceReminderLastSentDate(datePk)
-    }
-
     return NextResponse.json({
       success: true,
       date: datePk,
-      time: timePkHHmm,
-      configuredTime: settings.timeHHmm,
       checkedInCount: checkedInUserIds.size,
       channelMembersCount: channelMembers.length,
       remindersSent: successCount,
       errors: errorCount,
-      forced: force,
     })
   } catch (err) {
     console.error('Error in attendance reminder cron:', err)
