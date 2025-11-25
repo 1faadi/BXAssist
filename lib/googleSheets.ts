@@ -701,10 +701,12 @@ export async function setOvertimeDecision(args: {
   messageTs: string
   decision: 'Approved' | 'Rejected'
   decidedBy: string // approver display name
+  decidedById?: string // approver user ID for mentions
 }): Promise<{
   alreadyDecided: boolean
   status: 'Approved' | 'Rejected'
   decidedBy: string
+  decidedById?: string
   decidedAt: string
   requesterId: string
   projectName: string
@@ -713,7 +715,7 @@ export async function setOvertimeDecision(args: {
   minutes: number
   reason: string
 }> {
-  const { channelId, messageTs, decision, decidedBy } = args
+  const { channelId, messageTs, decision, decidedBy, decidedById } = args
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
@@ -748,6 +750,7 @@ export async function setOvertimeDecision(args: {
       alreadyDecided: true,
       status: row[8] as 'Approved' | 'Rejected',
       decidedBy: row[9] || '',
+      decidedById: undefined, // Not stored in sheet, but can be passed if needed
       decidedAt: row[10] || new Date().toISOString(),
       requesterId: row[1], // SlackUserId (B)
       projectName: row[3], // ProjectName (D)
@@ -778,6 +781,7 @@ export async function setOvertimeDecision(args: {
     alreadyDecided: false,
     status: decision,
     decidedBy,
+    decidedById,
     decidedAt,
     requesterId: row[1], // SlackUserId (B)
     projectName: row[3], // ProjectName (D)
@@ -899,4 +903,61 @@ export async function markOvertimeApproverMessagesClosed(
       })
     }
   }
+}
+
+/**
+ * Get overtime request by channel ID and message TS
+ * Returns all fields needed to rebuild Slack blocks
+ */
+export async function getOvertimeRequestByKey(args: {
+  channelId: string
+  messageTs: string
+}): Promise<null | {
+  requesterId: string
+  projectName: string
+  assignedByUserId: string
+  hours: number
+  minutes: number
+  reason: string
+  status: 'Pending' | 'Approved' | 'Rejected'
+  decisionBy?: string
+  decisionAt?: string
+  channelId: string
+  messageTs: string
+}> {
+  const { channelId, messageTs } = args
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'OvertimeRequests!A2:M10000', // skip header, columns A-M
+  })
+
+  const rows = res.data.values || []
+
+  for (const row of rows) {
+    // Ensure row has all 13 columns (A-M)
+    const fullRow = [...row]
+    while (fullRow.length < 13) fullRow.push('')
+
+    const ts = fullRow[11] // SlackMessageTs (L)
+    const ch = fullRow[12] // SlackChannelId (M)
+
+    if (ts === messageTs && ch === channelId) {
+      return {
+        requesterId: fullRow[1] || '', // SlackUserId (B)
+        projectName: fullRow[3] || '', // ProjectName (D)
+        assignedByUserId: fullRow[4] || '', // AssignedByUserId (E)
+        hours: Number(fullRow[5]) || 0, // Hours (F)
+        minutes: Number(fullRow[6]) || 0, // Minutes (G)
+        reason: fullRow[7] || '', // Reason (H)
+        status: (fullRow[8] || 'Pending') as 'Pending' | 'Approved' | 'Rejected', // Status (I)
+        decisionBy: fullRow[9] || undefined, // DecisionBy (J)
+        decisionAt: fullRow[10] || undefined, // DecisionAt (K)
+        channelId: ch,
+        messageTs: ts,
+      }
+    }
+  }
+
+  return null
 }

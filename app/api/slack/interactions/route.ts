@@ -29,6 +29,11 @@ import {
   getOvertimeApproverMessages,
   markOvertimeApproverMessagesClosed,
 } from '@/lib/googleSheets'
+import {
+  buildOvertimeChannelBlocks,
+  buildOvertimeApproverDmBlocks,
+  buildOvertimeRequesterDmBlocks,
+} from '@/lib/slackBlocks/overtime'
 
 const LEAVE_CHANNEL_ID = process.env.SLACK_LEAVE_CHANNEL_ID
 
@@ -608,6 +613,7 @@ export async function POST(req: NextRequest) {
           messageTs: mainMessageTs,
           decision,
           decidedBy: approverName,
+          decidedById: approverId, // Pass user ID for mentions
         })
 
         const {
@@ -642,50 +648,28 @@ export async function POST(req: NextRequest) {
 
         // If already decided, just update the clicked DM
         if (alreadyDecided) {
-          const emoji = status === 'Approved' ? '✅' : '❌'
+          const finalText = `⚠️ Already decided: ${status}`
+          const decisionByMention = decisionResult.decidedById
+            ? `<@${decisionResult.decidedById}>`
+            : decidedBy
+
+          const approverDmBlocks = buildOvertimeApproverDmBlocks({
+            requesterId,
+            projectName,
+            assignedByUserId,
+            hours,
+            minutes,
+            reason: reason || undefined,
+            finalText,
+            decisionByMention,
+            decisionAtText: decisionTime,
+          })
+
           await slackClient.chat.update({
             channel: clickedDmChannelId,
             ts: clickedDmMessageTs,
-            text: `⚠️ Already decided: ${status}`,
-            blocks: [
-              {
-                type: 'header',
-                text: {
-                  type: 'plain_text',
-                  text: `${emoji} Overtime ${status}`,
-                },
-              },
-              {
-                type: 'section',
-                fields: [
-                  {
-                    type: 'mrkdwn',
-                    text: `*Employee:*\n<@${requesterId}>`,
-                  },
-                  {
-                    type: 'mrkdwn',
-                    text: `*Project:*\n${projectName}`,
-                  },
-                  {
-                    type: 'mrkdwn',
-                    text: `*Duration:*\n${durationText}`,
-                  },
-                  {
-                    type: 'mrkdwn',
-                    text: `*Status:*\n${status} by ${decidedBy}`,
-                  },
-                ],
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: `⚠️ This request was already ${status.toLowerCase()} at ${decisionTime} (PKT)`,
-                  },
-                ],
-              },
-            ] as any,
+            text: finalText,
+            blocks: approverDmBlocks,
           })
 
           // Return 200 (idempotent - no new actions)
@@ -693,96 +677,28 @@ export async function POST(req: NextRequest) {
         }
 
         // New decision - update main channel message, DM requester, and update all approver DMs
-        // 1. Update main overtime channel message
-        let originalMessage
-        try {
-          const messageResponse = await slackClient.conversations.history({
-            channel: overtimeChannelId,
-            latest: mainMessageTs,
-            limit: 1,
-            inclusive: true,
-          })
-          originalMessage = messageResponse.messages?.[0]
-        } catch (error) {
-          console.warn('Could not fetch original message:', error)
-        }
+        // 1. Update main overtime channel message (rebuild blocks from data, no API fetch)
+        const decisionByMention = decisionResult.decidedById
+          ? `<@${decisionResult.decidedById}>`
+          : decidedBy
 
-        // Build updated blocks for main channel message
-        const updatedBlocks = originalMessage?.blocks
-          ? (originalMessage.blocks as any[])
-              .map((block: any) => {
-                if (block.type === 'context') {
-                  // Update status line with decision info
-                  return {
-                    ...block,
-                    elements: [
-                      {
-                        type: 'mrkdwn',
-                        text: `*Status:* ${status} by ${decidedBy} at ${decisionTime} (PKT)`,
-                      },
-                    ],
-                  }
-                }
-                return block
-              })
-              .filter(Boolean)
-          : [
-              {
-                type: 'header',
-                text: {
-                  type: 'plain_text',
-                  text: '⏱️ Overtime Request',
-                },
-              },
-              {
-                type: 'section',
-                fields: [
-                  {
-                    type: 'mrkdwn',
-                    text: `*Employee:*\n<@${requesterId}>`,
-                  },
-                  {
-                    type: 'mrkdwn',
-                    text: `*Project:*\n${projectName}`,
-                  },
-                  {
-                    type: 'mrkdwn',
-                    text: `*Assigned by:*\n<@${assignedByUserId}>`,
-                  },
-                  {
-                    type: 'mrkdwn',
-                    text: `*Duration:*\n${durationText}`,
-                  },
-                ],
-              },
-              ...(reason
-                ? ([
-                    {
-                      type: 'section',
-                      text: {
-                        type: 'mrkdwn',
-                        text: `*Task / Reason:*\n${reason}`,
-                      },
-                    },
-                  ] as any[])
-                : []),
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: `*Status:* ${status} by ${decidedBy} at ${decisionTime} (PKT)`,
-                  },
-                ],
-              },
-            ]
+        const channelBlocks = buildOvertimeChannelBlocks({
+          requesterId,
+          projectName,
+          assignedByUserId,
+          hours,
+          minutes,
+          reason: reason || undefined,
+          status,
+          decisionByMention,
+          decisionAtText: decisionTime,
+        })
 
-        // Update main channel message
         await slackClient.chat.update({
           channel: overtimeChannelId,
           ts: mainMessageTs,
           text: `⏱️ Overtime Request ${status.toLowerCase()} by ${decidedBy}`, // fallback
-          blocks: updatedBlocks as any,
+          blocks: channelBlocks,
         })
 
         // 2. DM requester
@@ -792,67 +708,22 @@ export async function POST(req: NextRequest) {
           })
 
           if (dmResponse.channel?.id) {
-            const emoji = decision === 'Approved' ? '✅' : '❌'
-            const headerText =
-              decision === 'Approved' ? 'Overtime Approved' : 'Overtime Rejected'
+            const requesterDmBlocks = buildOvertimeRequesterDmBlocks({
+              status,
+              requesterId,
+              projectName,
+              assignedByUserId,
+              hours,
+              minutes,
+              reason: reason || undefined,
+              decidedByMention: decisionByMention,
+              decidedAtText: decisionTime,
+            })
 
             await slackClient.chat.postMessage({
               channel: dmResponse.channel.id,
-              text: `${emoji} Your overtime request for ${projectName} has been ${status.toLowerCase()} by ${decidedBy}.`,
-              blocks: [
-                {
-                  type: 'header',
-                  text: {
-                    type: 'plain_text',
-                    text: `${emoji} ${headerText}`,
-                  },
-                },
-                {
-                  type: 'section',
-                  fields: [
-                    {
-                      type: 'mrkdwn',
-                      text: `*Project:*\n${projectName}`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Assigned by:*\n<@${assignedByUserId}>`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Duration:*\n${durationText}`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Decision:*\n${status} by ${decidedBy}`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Time:*\n${decisionTime} (PKT)`,
-                    },
-                  ],
-                },
-                ...(reason
-                  ? ([
-                      {
-                        type: 'section',
-                        text: {
-                          type: 'mrkdwn',
-                          text: `*Task / Reason:*\n${reason}`,
-                        },
-                      },
-                    ] as any[])
-                  : []),
-                {
-                  type: 'context',
-                  elements: [
-                    {
-                      type: 'mrkdwn',
-                      text: `Decision made at ${decisionTime} (PKT)`,
-                    },
-                  ],
-                },
-              ] as any,
+              text: `${status === 'Approved' ? '✅' : '❌'} Your overtime request for ${projectName} has been ${status.toLowerCase()} by ${decidedBy}.`,
+              blocks: requesterDmBlocks,
             })
           }
         } catch (dmError) {
@@ -862,66 +733,28 @@ export async function POST(req: NextRequest) {
 
         // 3. Update ALL approver DM messages
         const approverMessages = await getOvertimeApproverMessages(requestKey)
-        const emoji = status === 'Approved' ? '✅' : '❌'
-        const headerText = status === 'Approved' ? 'Overtime Approved' : 'Overtime Rejected'
+        const finalText = status === 'Approved' ? '✅ Approved' : '❌ Rejected'
 
         for (let i = 0; i < approverMessages.length; i++) {
           const msg = approverMessages[i]
           try {
+            const approverDmBlocks = buildOvertimeApproverDmBlocks({
+              requesterId,
+              projectName,
+              assignedByUserId,
+              hours,
+              minutes,
+              reason: reason || undefined,
+              finalText,
+              decisionByMention,
+              decisionAtText: decisionTime,
+            })
+
             await slackClient.chat.update({
               channel: msg.imChannelId,
               ts: msg.messageTs,
-              text: `${emoji} ${headerText}`,
-              blocks: [
-                {
-                  type: 'header',
-                  text: {
-                    type: 'plain_text',
-                    text: `${emoji} ${headerText}`,
-                  },
-                },
-                {
-                  type: 'section',
-                  fields: [
-                    {
-                      type: 'mrkdwn',
-                      text: `*Employee:*\n<@${requesterId}>`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Project:*\n${projectName}`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Duration:*\n${durationText}`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Status:*\n${status} by ${decidedBy}`,
-                    },
-                  ],
-                },
-                ...(reason
-                  ? ([
-                      {
-                        type: 'section',
-                        text: {
-                          type: 'mrkdwn',
-                          text: `*Task / Reason:*\n${reason}`,
-                        },
-                      },
-                    ] as any[])
-                  : []),
-                {
-                  type: 'context',
-                  elements: [
-                    {
-                      type: 'mrkdwn',
-                      text: `Decided by ${decidedBy} at ${decisionTime} (PKT)`,
-                    },
-                  ],
-                },
-              ] as any,
+              text: finalText,
+              blocks: approverDmBlocks,
             })
 
             // Small delay to avoid rate limits
@@ -1009,82 +842,54 @@ export async function POST(req: NextRequest) {
         reason,
       } = decisionResult
 
-      // Get the original message to update it
-      let originalMessage
-      try {
-        const messageResponse = await slackClient.conversations.history({
-          channel: channelId,
-          latest: messageTs,
-          limit: 1,
-          inclusive: true,
-        })
-        originalMessage = messageResponse.messages?.[0]
-      } catch (error) {
-        console.warn('Could not fetch original message:', error)
-      }
+      // Build updated blocks for main channel message (rebuild from data, no API fetch)
+      const decisionTime = new Date(decidedAt).toLocaleString('en-GB', {
+        timeZone: 'Asia/Karachi',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
 
-      // Build updated blocks for main channel message (remove buttons after decision)
-      const updatedBlocks = originalMessage?.blocks
-        ? (originalMessage.blocks as any[])
-            .map((block: any) => {
-              if (block.type === 'context') {
-                // Update status line with decision info
-                const decisionTime = new Date(decidedAt).toLocaleString()
-                return {
-                  ...block,
-                  elements: [
-                    {
-                      type: 'mrkdwn',
-                      text: `*Status:* ${status} by ${decidedBy} at ${decisionTime}`,
-                    },
-                  ],
-                }
-              }
-              // Remove the actions block (buttons) after decision
-              if (block.type === 'actions' && block.block_id === 'leave_decision') {
-                return null
-              }
-              return block
-            })
-            .filter(Boolean) // Remove null blocks
-        : [
+      const updatedBlocks = [
+        {
+          type: 'header',
+          text: {
+            type: 'plain_text',
+            text: '📝 Leave Request',
+          },
+        },
+        {
+          type: 'section',
+          fields: [
             {
-              type: 'header',
-              text: {
-                type: 'plain_text',
-                text: '📝 Leave Request',
-              },
+              type: 'mrkdwn',
+              text: `*Employee:*\n<@${requesterId}>`,
             },
             {
-              type: 'section',
-              fields: [
-                {
-                  type: 'mrkdwn',
-                  text: `*Employee:*\n<@${requesterId}>`,
-                },
-                {
-                  type: 'mrkdwn',
-                  text: `*Dates:*\n${fromDate} → ${toDate}`,
-                },
-              ],
+              type: 'mrkdwn',
+              text: `*Dates:*\n${fromDate} → ${toDate}`,
             },
+          ],
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*Reason:*\n${reason}`,
+          },
+        },
+        {
+          type: 'context',
+          elements: [
             {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: `*Reason:*\n${reason}`,
-              },
+              type: 'mrkdwn',
+              text: `*Status:* ${status} by ${decidedBy} at ${decisionTime} (PKT)`,
             },
-            {
-              type: 'context',
-              elements: [
-                {
-                  type: 'mrkdwn',
-                  text: `*Status:* ${status} by ${decidedBy} at ${new Date(decidedAt).toLocaleString()}`,
-                },
-              ],
-            },
-          ]
+          ],
+        },
+      ]
 
       // Update main channel message
       await slackClient.chat.update({
