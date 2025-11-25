@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     if (attendanceChannelId) {
       await slackClient.chat.postMessage({
         channel: attendanceChannelId,
-        text: `🟢 Check-in: ${employeeName} at ${timePkHHmm}`,
+        text: `🟢 Check-in: <@${slackUserId}> at ${timePkHHmm}`,
         blocks: [
           {
             type: 'header',
@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
             fields: [
               {
                 type: 'mrkdwn',
-                text: `*Employee:*\n<@${slackUserId}> (${employeeName})`,
+                text: `*Employee:*\n<@${slackUserId}>`,
               },
               {
                 type: 'mrkdwn',
