@@ -702,6 +702,7 @@ export async function setOvertimeDecision(args: {
   decision: 'Approved' | 'Rejected'
   decidedBy: string // approver display name
 }): Promise<{
+  alreadyDecided: boolean
   status: 'Approved' | 'Rejected'
   decidedBy: string
   decidedAt: string
@@ -742,8 +743,9 @@ export async function setOvertimeDecision(args: {
 
   // Check if already decided
   if (row[8] === 'Approved' || row[8] === 'Rejected') {
-    // Return existing decision info
+    // Return existing decision info with alreadyDecided flag
     return {
+      alreadyDecided: true,
       status: row[8] as 'Approved' | 'Rejected',
       decidedBy: row[9] || '',
       decidedAt: row[10] || new Date().toISOString(),
@@ -773,6 +775,7 @@ export async function setOvertimeDecision(args: {
   })
 
   return {
+    alreadyDecided: false,
     status: decision,
     decidedBy,
     decidedAt,
@@ -782,5 +785,118 @@ export async function setOvertimeDecision(args: {
     hours: Number(row[5]) || 0, // Hours (F)
     minutes: Number(row[6]) || 0, // Minutes (G)
     reason: row[7] || '', // Reason (H)
+  }
+}
+
+/**
+ * Overtime Approver Messages Tab Helpers
+ * 
+ * OvertimeApproverMessages tab structure:
+ * A: RequestKey (format: "channelId:messageTs")
+ * B: ApproverUserId
+ * C: ImChannelId (DM channel ID)
+ * D: MessageTs (DM message timestamp)
+ * E: Status (pending, closed:approved, closed:rejected)
+ * Header row: A1="RequestKey", B1="ApproverUserId", etc.
+ */
+
+/**
+ * Add a new approver DM message record
+ */
+export async function addOvertimeApproverMessage(args: {
+  requestKey: string
+  approverUserId: string
+  imChannelId: string
+  messageTs: string
+}): Promise<void> {
+  const { requestKey, approverUserId, imChannelId, messageTs } = args
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'OvertimeApproverMessages!A1',
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [
+        [
+          requestKey, // A: RequestKey
+          approverUserId, // B: ApproverUserId
+          imChannelId, // C: ImChannelId
+          messageTs, // D: MessageTs
+          'pending', // E: Status
+        ],
+      ],
+    },
+  })
+}
+
+/**
+ * Get all approver DM messages for a request key
+ */
+export async function getOvertimeApproverMessages(
+  requestKey: string
+): Promise<
+  Array<{
+    approverUserId: string
+    imChannelId: string
+    messageTs: string
+    status: string
+  }>
+> {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'OvertimeApproverMessages!A2:E10000', // skip header, columns A-E
+  })
+
+  const rows = res.data.values || []
+  const messages: Array<{
+    approverUserId: string
+    imChannelId: string
+    messageTs: string
+    status: string
+  }> = []
+
+  for (const row of rows) {
+    if (row[0] === requestKey) {
+      messages.push({
+        approverUserId: row[1] || '', // ApproverUserId (B)
+        imChannelId: row[2] || '', // ImChannelId (C)
+        messageTs: row[3] || '', // MessageTs (D)
+        status: row[4] || 'pending', // Status (E)
+      })
+    }
+  }
+
+  return messages
+}
+
+/**
+ * Mark all approver messages as closed for a request key
+ */
+export async function markOvertimeApproverMessagesClosed(
+  requestKey: string,
+  status: 'approved' | 'rejected'
+): Promise<void> {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'OvertimeApproverMessages!A2:E10000', // skip header, columns A-E
+  })
+
+  const rows = res.data.values || []
+  const closedStatus = `closed:${status}`
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    if (row[0] === requestKey && row[4] === 'pending') {
+      // Update status column (E)
+      const rowIndex = i + 2 // Convert to 1-based, accounting for header
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `OvertimeApproverMessages!E${rowIndex}`,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [[closedStatus]],
+        },
+      })
+    }
   }
 }
