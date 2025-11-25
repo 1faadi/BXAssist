@@ -24,6 +24,7 @@ declare namespace NodeJS {
     APP_BASE_URL: string // Base URL for generating signed attendance links (e.g., https://bx-assist.vercel.app)
     OFFICE_IP_ALLOWLIST?: string // Comma-separated list of public office IP addresses
     ATTENDANCE_SIGNING_SECRET?: string // Secret for signing attendance URLs
+    CRON_SECRET?: string // Secret for securing cron endpoints
 
     // Google Sheets configuration
     // Option 1: New format (preferred)

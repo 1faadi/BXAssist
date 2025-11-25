@@ -69,34 +69,70 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const now = new Date()
-    const timeStr = now.toTimeString().slice(0, 5) // HH:MM
+    const { timePkHHmm } = await import('@/lib/timePk').then((m) => m.nowPk())
 
     // Post to attendance channel
     const attendanceChannelId = process.env.SLACK_ATTENDANCE_CHANNEL_ID
-    if (attendanceChannelId && result.totalHours !== undefined) {
+    if (attendanceChannelId && result.totalHours) {
       await slackClient.chat.postMessage({
         channel: attendanceChannelId,
-        text: `Check-out: ${employeeName} at ${timeStr}`,
+        text: `🔴 Check-out: ${employeeName} at ${timePkHHmm}`,
         blocks: [
+          {
+            type: 'header',
+            text: {
+              type: 'plain_text',
+              text: '🔴 Check-out Recorded',
+            },
+          },
+          {
+            type: 'section',
+            fields: [
+              {
+                type: 'mrkdwn',
+                text: `*Employee:*\n<@${slackUserId}> (${employeeName})`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Date:*\n${result.date}`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Check-in:*\n${result.checkInTime}`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Check-out:*\n${result.checkOutTime}`,
+              },
+            ],
+          },
           {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `👋 *Check-out*\n*Employee:* <@${slackUserId}> (${employeeName})\n*Date:* ${result.date}\n*Check-in:* ${result.checkInTime}\n*Check-out:* ${timeStr}\n*Total Hours:* ${result.totalHours} hrs`,
+              text: `⏱ *Total:* ${result.totalHours}`,
             },
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: 'Have a great day 👋',
+              },
+            ],
           },
         ],
       })
     }
 
     // Build success message
-    const successMsg = `✅ Check-out recorded for ${employeeName} at ${timeStr}.<br><br>
+    const successMsg = `✅ Check-out recorded for ${employeeName} at ${timePkHHmm}.<br><br>
       <strong>Summary:</strong><br>
       Date: ${result.date}<br>
       Check-in: ${result.checkInTime}<br>
-      Check-out: ${timeStr}<br>
-      Total Hours: ${result.totalHours} hrs`
+      Check-out: ${result.checkOutTime}<br>
+      Total Hours: ${result.totalHours}`
 
     return html(successMsg)
   } catch (err) {

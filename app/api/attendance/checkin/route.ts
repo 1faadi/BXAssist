@@ -65,28 +65,57 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const now = new Date()
-    const timeStr = now.toTimeString().slice(0, 5) // HH:MM
+    const { timePk, timePkHHmm } = await import('@/lib/timePk').then((m) => m.nowPk())
 
     // Post to attendance channel
     const attendanceChannelId = process.env.SLACK_ATTENDANCE_CHANNEL_ID
     if (attendanceChannelId) {
       await slackClient.chat.postMessage({
         channel: attendanceChannelId,
-        text: `Check-in: ${employeeName} at ${timeStr}`,
+        text: `🟢 Check-in: ${employeeName} at ${timePkHHmm}`,
         blocks: [
           {
-            type: 'section',
+            type: 'header',
             text: {
-              type: 'mrkdwn',
-              text: `✅ *Check-in*\n*Employee:* <@${slackUserId}> (${employeeName})\n*Date:* ${result.date}\n*Time:* ${timeStr}`,
+              type: 'plain_text',
+              text: '🟢 Check-in Recorded',
             },
+          },
+          {
+            type: 'section',
+            fields: [
+              {
+                type: 'mrkdwn',
+                text: `*Employee:*\n<@${slackUserId}> (${employeeName})`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Date:*\n${result.date}`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Time:*\n${timePk}`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Network:*\nOffice ✅`,
+              },
+            ],
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: 'Recorded by BXAssist • Asia/Karachi time',
+              },
+            ],
           },
         ],
       })
     }
 
-    return html(`✅ Check-in recorded for ${employeeName} at ${timeStr}.`)
+    return html(`✅ Check-in recorded for ${employeeName} at ${timePkHHmm}.`)
   } catch (err) {
     console.error('Error in check-in endpoint:', err)
     return html('❌ An error occurred while recording check-in. Please try again.')

@@ -159,28 +159,35 @@ export async function setLeaveDecision(args: {
  * Record check-in for an employee
  * 
  * Attendance sheet structure:
- * A: Date (YYYY-MM-DD)
+ * A: Date (YYYY-MM-DD in Asia/Karachi)
  * B: SlackUserId
  * C: EmployeeName
- * D: CheckIn (HH:MM:SS)
- * E: CheckOut (HH:MM:SS)
+ * D: CheckInTime (HH:mm:ss in Asia/Karachi)
+ * E: CheckOutTime (HH:mm:ss in Asia/Karachi)
+ * F: TotalHours (e.g., "5h 19m")
+ * G: FirstCheckInTimestamp (ISO UTC)
+ * H: LastCheckOutTimestamp (ISO UTC)
  * 
  * Returns:
  * - alreadyCheckedIn: true if check-in already exists for today
  * - checkInTime: time of check-in (if already checked in)
- * - date: date string
+ * - date: date string (PK time)
+ * - firstCheckInTimestamp: ISO timestamp (if already checked in)
  */
 export async function recordCheckIn(params: {
   slackUserId: string
   employeeName: string
-}): Promise<{ alreadyCheckedIn: boolean; checkInTime?: string; date: string }> {
+}): Promise<{
+  alreadyCheckedIn: boolean
+  checkInTime?: string
+  date: string
+  firstCheckInTimestamp?: string
+}> {
   const { slackUserId, employeeName } = params
-  const now = new Date()
-  const dateStr = now.toISOString().split('T')[0] // YYYY-MM-DD
-  const timeStr = now.toTimeString().split(' ')[0] // HH:MM:SS
+  const { nowIso, datePk, timePk } = await import('./timePk').then((m) => m.nowPk())
 
-  // Check if already checked in today
-  const range = 'Attendance!A2:E1000'
+  // Check if already checked in today (read full range A:H)
+  const range = 'Attendance!A2:H10000'
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
     range,
@@ -188,44 +195,58 @@ export async function recordCheckIn(params: {
 
   const rows = response.data.values || []
   for (const row of rows) {
-    if (row[0] === dateStr && row[1] === slackUserId && row[3]) {
+    if (row[0] === datePk && row[1] === slackUserId && row[3]) {
       // Already checked in today
       return {
         alreadyCheckedIn: true,
         checkInTime: row[3],
-        date: dateStr,
+        date: datePk,
+        firstCheckInTimestamp: row[6] || nowIso, // Column G
       }
     }
   }
 
-  // Append new check-in row
+  // Append new check-in row with all 8 columns
   await sheets.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
     range: 'Attendance!A1',
     valueInputOption: 'RAW',
     requestBody: {
-      values: [[dateStr, slackUserId, employeeName, timeStr, '']],
+      values: [
+        [
+          datePk, // A: Date
+          slackUserId, // B: SlackUserId
+          employeeName, // C: EmployeeName
+          timePk, // D: CheckInTime
+          '', // E: CheckOutTime (empty)
+          '', // F: TotalHours (empty)
+          nowIso, // G: FirstCheckInTimestamp
+          '', // H: LastCheckOutTimestamp (empty)
+        ],
+      ],
     },
   })
 
   return {
     alreadyCheckedIn: false,
-    date: dateStr,
+    date: datePk,
+    firstCheckInTimestamp: nowIso,
   }
 }
 
 /**
  * Record checkout for an employee
  * 
- * Finds today's check-in row and updates the checkout time.
+ * Finds today's check-in row and updates the checkout time and total hours.
  * 
  * Returns:
  * - canCheckout: false if no check-in found for today
  * - alreadyCheckedOut: true if already checked out
  * - checkOutTime: time of checkout (if already checked out)
  * - checkInTime: time of check-in
- * - date: date string
- * - totalHours: calculated hours between check-in and checkout
+ * - date: date string (PK time)
+ * - totalHours: formatted string (e.g., "5h 19m")
+ * - totalHoursDecimal: decimal hours (for calculations)
  */
 export async function recordCheckOut(params: {
   slackUserId: string
@@ -236,15 +257,15 @@ export async function recordCheckOut(params: {
   checkOutTime?: string
   checkInTime?: string
   date?: string
-  totalHours?: number
+  totalHours?: string // Formatted: "5h 19m"
+  totalHoursDecimal?: number // Decimal: 5.31
 }> {
   const { slackUserId, employeeName } = params
-  const now = new Date()
-  const dateStr = now.toISOString().split('T')[0] // YYYY-MM-DD
-  const timeStr = now.toTimeString().split(' ')[0] // HH:MM:SS
+  const { nowIso, datePk, timePk } = await import('./timePk').then((m) => m.nowPk())
+  const { formatTotalHours } = await import('./timePk').then((m) => m.formatTotalHours)
 
-  // Find today's check-in row
-  const range = 'Attendance!A2:E1000'
+  // Find today's check-in row (read full range A:H)
+  const range = 'Attendance!A2:H10000'
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
     range,
@@ -256,7 +277,7 @@ export async function recordCheckOut(params: {
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i]
-    if (r[0] === dateStr && r[1] === slackUserId && r[3]) {
+    if (r[0] === datePk && r[1] === slackUserId && r[3]) {
       // Found today's check-in
       foundRowIndex = i + 2 // Convert to 1-based, accounting for header
       row = r
@@ -268,6 +289,9 @@ export async function recordCheckOut(params: {
     return { canCheckout: false }
   }
 
+  // Ensure row has all 8 columns
+  while (row.length < 8) row.push('')
+
   // Check if already checked out
   if (row[4]) {
     return {
@@ -275,35 +299,43 @@ export async function recordCheckOut(params: {
       alreadyCheckedOut: true,
       checkOutTime: row[4],
       checkInTime: row[3],
-      date: dateStr,
+      date: datePk,
+      totalHours: row[5] || '', // Column F
     }
   }
 
-  // Update checkout time
-  row[4] = timeStr
+  // Get first check-in timestamp (column G)
+  const firstCheckInTimestamp = row[6] || nowIso
+
+  // Calculate total hours from timestamps
+  const checkInDate = new Date(firstCheckInTimestamp)
+  const checkOutDate = new Date(nowIso)
+  const totalMs = checkOutDate.getTime() - checkInDate.getTime()
+  const totalHoursDecimal = totalMs / (1000 * 60 * 60)
+  const totalHours = formatTotalHours(totalHoursDecimal)
+
+  // Update all columns (A:H)
+  row[4] = timePk // E: CheckOutTime
+  row[5] = totalHours // F: TotalHours
+  row[7] = nowIso // H: LastCheckOutTimestamp
+
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: `Attendance!A${foundRowIndex}:E${foundRowIndex}`,
+    range: `Attendance!A${foundRowIndex}:H${foundRowIndex}`, // Update full row A:H
     valueInputOption: 'RAW',
     requestBody: {
       values: [row],
     },
   })
 
-  // Calculate total hours
-  const checkInTime = row[3]
-  const checkInDate = new Date(`${dateStr}T${checkInTime}`)
-  const checkOutDate = new Date(`${dateStr}T${timeStr}`)
-  const totalMs = checkOutDate.getTime() - checkInDate.getTime()
-  const totalHours = totalMs / (1000 * 60 * 60)
-
   return {
     canCheckout: true,
     alreadyCheckedOut: false,
-    checkOutTime: timeStr,
-    checkInTime: checkInTime,
-    date: dateStr,
-    totalHours: Math.round(totalHours * 100) / 100, // Round to 2 decimals
+    checkOutTime: timePk,
+    checkInTime: row[3],
+    date: datePk,
+    totalHours,
+    totalHoursDecimal: Math.round(totalHoursDecimal * 100) / 100,
   }
 }
 
