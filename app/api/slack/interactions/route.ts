@@ -27,6 +27,7 @@ import {
   getOvertimeApproverMessages,
   markOvertimeApproverMessagesClosed,
 } from '@/lib/googleSheets'
+import { processOvertimeRequest } from '@/lib/jobs/overtime'
 import {
   buildOvertimeChannelBlocks,
   buildOvertimeApproverDmBlocks,
@@ -312,18 +313,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ response_action: 'errors', errors })
       }
 
-      // Kick off background processing via internal job endpoint (DON'T await)
-      const appBaseUrl = process.env.APP_BASE_URL
-      const jobsSecret = process.env.JOBS_SECRET
-
-      if (appBaseUrl && jobsSecret) {
-        void fetch(`${appBaseUrl}/api/jobs/overtime`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${jobsSecret}`,
-          },
-          body: JSON.stringify({
+      // Schedule heavy processing to run after response is sent
+      // Note: Next.js 14.2.0 doesn't have unstable_after, so we use setImmediate
+      // as a workaround. For better reliability, upgrade to Next.js 15+ to use unstable_after.
+      setImmediate(async () => {
+        try {
+          await processOvertimeRequest({
             requesterId: payload.user.id,
             requesterName: payload.user.username,
             projectName,
@@ -331,13 +326,11 @@ export async function POST(req: NextRequest) {
             minutes,
             assignedByUserId,
             reason,
-          }),
-        }).catch((error) => {
-          console.error('Failed to trigger overtime job:', error)
-        })
-      } else {
-        console.error('APP_BASE_URL or JOBS_SECRET not configured')
-      }
+          })
+        } catch (error) {
+          console.error('Overtime async job failed:', error)
+        }
+      })
 
       // ✅ Important: return immediately so Slack closes the modal
       return new NextResponse('', { status: 200 })
