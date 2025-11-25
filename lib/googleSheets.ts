@@ -261,8 +261,9 @@ export async function recordCheckOut(params: {
   totalHoursDecimal?: number // Decimal: 5.31
 }> {
   const { slackUserId, employeeName } = params
-  const { nowIso, datePk, timePk } = await import('./timePk').then((m) => m.nowPk())
-  const { formatTotalHours } = await import('./timePk').then((m) => m.formatTotalHours)
+  const timePkModule = await import('./timePk')
+  const { nowIso, datePk, timePk } = timePkModule.nowPk()
+  const { formatTotalHours } = timePkModule
 
   // Find today's check-in row (read full range A:H)
   const range = 'Attendance!A2:H10000'
