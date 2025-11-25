@@ -1,8 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/cron/attendance-reminder/6e396a54e4085610c016c61c55a76eb8c2a824e1e00c0269c1de988057183f2d",
-      "schedule": "10 4 * * 1-5"
+      "path": "/api/cron/schedule-checkin-reminders?key=6e396a54e4085610c016c61c55a76eb8c2a824e1e00c0269c1de988057183f2d",
+      "schedule": "0 0 * * 1-5"
     }
   ]
 }

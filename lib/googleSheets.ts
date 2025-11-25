@@ -359,3 +359,228 @@ export async function getValues(range: string): Promise<any[][]> {
   })
   return response.data.values || []
 }
+
+/**
+ * Settings Tab Helpers
+ * 
+ * Settings tab structure:
+ * A: Key
+ * B: Value
+ * Header row: A1="Key", B1="Value"
+ */
+
+/**
+ * Get a setting value by key from Settings tab
+ * Returns null if key not found
+ */
+export async function getSetting(key: string): Promise<string | null> {
+  const range = 'Settings!A2:B200'
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+  })
+
+  const rows = response.data.values || []
+  for (const row of rows) {
+    if (row[0] === key) {
+      return row[1] || null
+    }
+  }
+
+  return null
+}
+
+/**
+ * Set a setting value (update if exists, append if not)
+ */
+export async function setSetting(key: string, value: string): Promise<void> {
+  const range = 'Settings!A2:B200'
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+  })
+
+  const rows = response.data.values || []
+  let foundRowIndex: number | null = null
+
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i][0] === key) {
+      foundRowIndex = i + 2 // Convert to 1-based, accounting for header
+      break
+    }
+  }
+
+  if (foundRowIndex) {
+    // Update existing row
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Settings!A${foundRowIndex}:B${foundRowIndex}`,
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [[key, value]],
+      },
+    })
+  } else {
+    // Append new row
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Settings!A1',
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [[key, value]],
+      },
+    })
+  }
+}
+
+/**
+ * Attendance Reminder Queue Tab Helpers
+ * 
+ * AttendanceReminderQueue tab structure:
+ * A: Date (YYYY-MM-DD PKT)
+ * B: SlackUserId
+ * C: ImChannelId
+ * D: ScheduledMessageId
+ * E: PostAt (Unix epoch seconds)
+ * F: Status (scheduled, cancelled, sent)
+ * Header row: A1="Date", B1="SlackUserId", C1="ImChannelId", D1="ScheduledMessageId", E1="PostAt", F1="Status"
+ */
+
+/**
+ * Upsert a reminder queue row (update if exists for date+user, else append)
+ */
+export async function upsertReminderQueueRow(args: {
+  datePk: string
+  slackUserId: string
+  imChannelId: string
+  scheduledMessageId: string
+  postAt: number
+  status: 'scheduled' | 'cancelled' | 'sent'
+}): Promise<void> {
+  const { datePk, slackUserId, imChannelId, scheduledMessageId, postAt, status } = args
+
+  const range = 'AttendanceReminderQueue!A2:F10000'
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+  })
+
+  const rows = response.data.values || []
+  let foundRowIndex: number | null = null
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    if (row[0] === datePk && row[1] === slackUserId) {
+      foundRowIndex = i + 2 // Convert to 1-based, accounting for header
+      break
+    }
+  }
+
+  const rowData = [
+    datePk, // A
+    slackUserId, // B
+    imChannelId, // C
+    scheduledMessageId, // D
+    postAt.toString(), // E (as string)
+    status, // F
+  ]
+
+  if (foundRowIndex) {
+    // Update existing row
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `AttendanceReminderQueue!A${foundRowIndex}:F${foundRowIndex}`,
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [rowData],
+      },
+    })
+  } else {
+    // Append new row
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'AttendanceReminderQueue!A1',
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [rowData],
+      },
+    })
+  }
+}
+
+/**
+ * Find reminder queue entry for a user on a specific date
+ */
+export async function findReminderForUser(args: {
+  datePk: string
+  slackUserId: string
+}): Promise<{
+  imChannelId: string
+  scheduledMessageId: string
+  postAt: number
+  status: string
+} | null> {
+  const { datePk, slackUserId } = args
+
+  const range = 'AttendanceReminderQueue!A2:F10000'
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+  })
+
+  const rows = response.data.values || []
+  for (const row of rows) {
+    if (row[0] === datePk && row[1] === slackUserId) {
+      return {
+        imChannelId: row[2] || '',
+        scheduledMessageId: row[3] || '',
+        postAt: Number(row[4]) || 0,
+        status: row[5] || '',
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Mark reminder status (cancelled or sent)
+ */
+export async function markReminderStatus(args: {
+  datePk: string
+  slackUserId: string
+  status: 'cancelled' | 'sent'
+}): Promise<void> {
+  const { datePk, slackUserId, status } = args
+
+  const range = 'AttendanceReminderQueue!A2:F10000'
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+  })
+
+  const rows = response.data.values || []
+  let foundRowIndex: number | null = null
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    if (row[0] === datePk && row[1] === slackUserId) {
+      foundRowIndex = i + 2 // Convert to 1-based, accounting for header
+      break
+    }
+  }
+
+  if (!foundRowIndex) {
+    throw new Error('Reminder queue entry not found')
+  }
+
+  // Update only the Status column (F)
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `AttendanceReminderQueue!F${foundRowIndex}`,
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [[status]],
+    },
+  })
+}

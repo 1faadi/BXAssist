@@ -13,13 +13,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { recordCheckIn } from '@/lib/googleSheets'
+import { recordCheckIn, findReminderForUser, markReminderStatus } from '@/lib/googleSheets'
 import {
   getClientIp,
   isIpAllowed,
   verifySignedAttendanceRequest,
 } from '@/lib/attendanceSecurity'
 import { slackClient } from '@/lib/slackClient'
+import { getPkDateStr } from '@/lib/pkTime'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
@@ -63,6 +64,36 @@ export async function GET(req: NextRequest) {
       return html(
         `You already checked in today at ${result.checkInTime}.`
       )
+    }
+
+    // Cancel scheduled reminder if it exists
+    try {
+      const datePk = getPkDateStr()
+      const reminder = await findReminderForUser({
+        datePk,
+        slackUserId,
+      })
+
+      if (reminder && reminder.status === 'scheduled') {
+        try {
+          await slackClient.chat.deleteScheduledMessage({
+            channel: reminder.imChannelId,
+            scheduled_message_id: reminder.scheduledMessageId,
+          })
+          await markReminderStatus({
+            datePk,
+            slackUserId,
+            status: 'cancelled',
+          })
+          console.log(`Cancelled scheduled reminder for user ${slackUserId}`)
+        } catch (cancelError) {
+          // Log but don't fail check-in if cancellation fails
+          console.warn(`Failed to cancel reminder for user ${slackUserId}:`, cancelError)
+        }
+      }
+    } catch (reminderError) {
+      // Log but don't fail check-in if reminder lookup fails
+      console.warn(`Error checking for reminder:`, reminderError)
     }
 
     const { timePk, timePkHHmm } = await import('@/lib/timePk').then((m) => m.nowPk())
