@@ -340,8 +340,8 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      // Build message blocks (will be reused for update)
-      const buildMessageBlocks = (messageTs: string) => [
+      // Build channel message blocks (NO buttons - visible to everyone)
+      const channelMessageBlocks = [
         {
           type: 'header',
           text: {
@@ -386,10 +386,64 @@ export async function POST(req: NextRequest) {
           elements: [
             {
               type: 'mrkdwn',
-              text: '*Status:* Pending approval',
+              text: `*Status:* Pending approval (waiting for <@${assignedByUserId}>)`,
             },
           ],
         },
+      ]
+
+      // Post ONE message to overtime channel (NO buttons)
+      const message = await slackClient.chat.postMessage({
+        channel: overtimeChannelId,
+        text: `⏱️ Overtime Request from <@${requesterId}>`, // fallback
+        blocks: channelMessageBlocks as any,
+      })
+
+      const ts = message.ts as string
+      const channelId = message.channel as string
+      const nowIso = new Date().toISOString()
+
+      // Build ephemeral message blocks (WITH buttons - only visible to assignedByUserId)
+      const ephemeralMessageBlocks = [
+        {
+          type: 'header',
+          text: {
+            type: 'plain_text',
+            text: '⏱️ Overtime Approval Required',
+          },
+        },
+        {
+          type: 'section',
+          fields: [
+            {
+              type: 'mrkdwn',
+              text: `*Employee:*\n<@${requesterId}>`,
+            },
+            {
+              type: 'mrkdwn',
+              text: `*Project:*\n${projectName}`,
+            },
+            {
+              type: 'mrkdwn',
+              text: `*Assigned by:*\n<@${assignedByUserId}>`,
+            },
+            {
+              type: 'mrkdwn',
+              text: `*Duration:*\n${durationText}`,
+            },
+          ],
+        },
+        ...(reason
+          ? ([
+              {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: `*Task / Reason:*\n${reason}`,
+                },
+              },
+            ] as any[])
+          : []),
         {
           type: 'actions',
           block_id: 'ot_decision',
@@ -403,8 +457,8 @@ export async function POST(req: NextRequest) {
               },
               action_id: 'ot_approve',
               value: JSON.stringify({
-                channelId: overtimeChannelId,
-                messageTs: messageTs,
+                channelId: channelId,
+                messageTs: ts,
               }),
             },
             {
@@ -416,32 +470,20 @@ export async function POST(req: NextRequest) {
               },
               action_id: 'ot_reject',
               value: JSON.stringify({
-                channelId: overtimeChannelId,
-                messageTs: messageTs,
+                channelId: channelId,
+                messageTs: ts,
               }),
             },
           ],
         },
       ]
 
-      // Post ONE message to overtime channel with Approve/Reject buttons
-      // We need to post first to get messageTs, then update with correct button values
-      const message = await slackClient.chat.postMessage({
+      // Post ephemeral message to assignedByUserId (with buttons)
+      await slackClient.chat.postEphemeral({
         channel: overtimeChannelId,
-        text: `⏱️ Overtime Request from <@${requesterId}>`, // fallback
-        blocks: buildMessageBlocks(''), // Temporary empty messageTs
-      })
-
-      const ts = message.ts as string
-      const channelId = message.channel as string
-      const nowIso = new Date().toISOString()
-
-      // Update button values with actual messageTs
-      await slackClient.chat.update({
-        channel: channelId,
-        ts: ts,
-        text: `⏱️ Overtime Request from <@${requesterId}>`,
-        blocks: buildMessageBlocks(ts) as any,
+        user: assignedByUserId,
+        text: 'Overtime approval required',
+        blocks: ephemeralMessageBlocks as any,
       })
 
       // Save to Google Sheets
@@ -567,17 +609,27 @@ export async function POST(req: NextRequest) {
           minute: '2-digit',
         })
 
-        // If already decided, return ephemeral message
+        // If already decided, replace ephemeral message and return
         if (alreadyDecided) {
           return NextResponse.json({
             response_type: 'ephemeral',
-            text: `⚠️ This overtime request has already been ${status.toLowerCase()} by ${decidedBy} at ${decisionTime} (PKT).`,
+            replace_original: true,
+            text: `⚠️ Decision already recorded`,
+            blocks: [
+              {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: `⚠️ This overtime request has already been ${status.toLowerCase()} by ${decidedBy} at ${decisionTime} (PKT).`,
+                },
+              },
+            ] as any,
           })
         }
 
-        // New decision - update channel message (remove buttons) and DM requester
-        // 1. Update the overtime channel message (remove buttons, show status)
-        const updatedBlocks = [
+        // New decision - update channel message and DM requester
+        // 1. Update the overtime channel message (show status - no buttons to remove)
+        const updatedChannelBlocks = [
           {
             type: 'header',
             text: {
@@ -628,15 +680,15 @@ export async function POST(req: NextRequest) {
           },
         ]
 
-        // Update main channel message (buttons are removed by not including actions block)
+        // Update channel message (status only, no buttons to remove)
         await slackClient.chat.update({
           channel: channelId,
           ts: messageTs,
           text: `⏱️ Overtime Request ${status.toLowerCase()} by ${decidedBy}`, // fallback
-          blocks: updatedBlocks as any,
+          blocks: updatedChannelBlocks as any,
         })
 
-        // 2. DM requester
+        // 2. DM requester (only once, idempotency handled by setOvertimeDecision)
         try {
           const dmResponse = await slackClient.conversations.open({
             users: requesterId,
@@ -711,8 +763,22 @@ export async function POST(req: NextRequest) {
           console.warn(`Could not send DM to requester ${requesterId}:`, dmError)
         }
 
-        // Return 200 (idempotent - no response needed)
-        return new NextResponse('', { status: 200 })
+        // 3. Replace ephemeral message to remove buttons
+        const emoji = decision === 'Approved' ? '✅' : '❌'
+        return NextResponse.json({
+          response_type: 'ephemeral',
+          replace_original: true,
+          text: `${emoji} Decision recorded: ${status}`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `${emoji} *Decision recorded: ${status}*\n\nYour decision has been recorded. The requester has been notified.`,
+              },
+            },
+          ] as any,
+        })
       }
 
       // Handle leave approve/reject (existing logic)
