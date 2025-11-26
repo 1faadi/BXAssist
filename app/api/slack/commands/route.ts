@@ -315,12 +315,28 @@ export async function POST(req: NextRequest) {
       // Get today's date in PKT (YYYY-MM-DD)
       const { datePk, timePkHHmm } = await import('@/lib/timePk').then((m) => m.nowPk())
       
-      // Round time to next 5 minutes (optional enhancement)
+      // Round time to next 5 minutes and ensure it's within 9:00 AM - 6:00 PM range
       const [hours, minutes] = timePkHHmm.split(':').map(Number)
       const roundedMinutes = Math.ceil(minutes / 5) * 5
-      const roundedHours = roundedMinutes >= 60 ? (hours + 1) % 24 : hours
+      let roundedHours = roundedMinutes >= 60 ? (hours + 1) % 24 : hours
       const roundedMins = roundedMinutes >= 60 ? 0 : roundedMinutes
-      const initialTime = `${String(roundedHours).padStart(2, '0')}:${String(roundedMins).padStart(2, '0')}`
+      
+      // Clamp to allowed range: 9:00 AM (09:00) to 6:00 PM (18:00)
+      const timeInMinutes = roundedHours * 60 + roundedMins
+      const minTime = 9 * 60 // 09:00 = 540 minutes
+      const maxTime = 18 * 60 // 18:00 = 1080 minutes
+      
+      let initialTime: string
+      if (timeInMinutes < minTime) {
+        // Before 9:00 AM, set to 9:00 AM
+        initialTime = '09:00'
+      } else if (timeInMinutes > maxTime) {
+        // After 6:00 PM, set to 6:00 PM
+        initialTime = '18:00'
+      } else {
+        // Within range, use rounded time
+        initialTime = `${String(roundedHours).padStart(2, '0')}:${String(roundedMins).padStart(2, '0')}`
+      }
 
       await slackClient.views.open({
         trigger_id: triggerId,

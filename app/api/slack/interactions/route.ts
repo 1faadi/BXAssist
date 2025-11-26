@@ -530,6 +530,21 @@ export async function POST(req: NextRequest) {
         })
       }
 
+      // Validate time range: 9:00 AM to 6:00 PM (09:00 to 18:00)
+      const [hours, minutes] = timeFrom.split(':').map(Number)
+      const timeInMinutes = hours * 60 + minutes
+      const minTime = 9 * 60 // 09:00 = 540 minutes
+      const maxTime = 18 * 60 // 18:00 = 1080 minutes
+
+      if (timeInMinutes < minTime || timeInMinutes > maxTime) {
+        return NextResponse.json({
+          response_action: 'errors',
+          errors: {
+            sl_time_from: 'Time must be between 9:00 AM and 6:00 PM',
+          },
+        })
+      }
+
       const requesterId: string = payload.user.id
 
       // Get requester's display name (for Google Sheets only)
