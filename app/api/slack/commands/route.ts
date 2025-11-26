@@ -310,6 +310,100 @@ export async function POST(req: NextRequest) {
       return new NextResponse('', { status: 200 })
     }
 
+    // Handle /short-leave-req command
+    if (command === '/short-leave-req') {
+      // Get today's date in PKT (YYYY-MM-DD)
+      const { datePk, timePkHHmm } = await import('@/lib/timePk').then((m) => m.nowPk())
+      
+      // Round time to next 5 minutes (optional enhancement)
+      const [hours, minutes] = timePkHHmm.split(':').map(Number)
+      const roundedMinutes = Math.ceil(minutes / 5) * 5
+      const roundedHours = roundedMinutes >= 60 ? (hours + 1) % 24 : hours
+      const roundedMins = roundedMinutes >= 60 ? 0 : roundedMinutes
+      const initialTime = `${String(roundedHours).padStart(2, '0')}:${String(roundedMins).padStart(2, '0')}`
+
+      await slackClient.views.open({
+        trigger_id: triggerId,
+        view: {
+          type: 'modal',
+          callback_id: 'short_leave_request_modal',
+          title: {
+            type: 'plain_text',
+            text: 'Short Leave Request',
+          },
+          submit: {
+            type: 'plain_text',
+            text: 'Submit',
+          },
+          close: {
+            type: 'plain_text',
+            text: 'Cancel',
+          },
+          blocks: [
+            {
+              type: 'input',
+              block_id: 'sl_from_date',
+              label: {
+                type: 'plain_text',
+                text: 'Date from',
+              },
+              element: {
+                type: 'datepicker',
+                action_id: 'value',
+                initial_date: datePk,
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'sl_to_date',
+              label: {
+                type: 'plain_text',
+                text: 'Date to',
+              },
+              element: {
+                type: 'datepicker',
+                action_id: 'value',
+                initial_date: datePk,
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'sl_time_from',
+              label: {
+                type: 'plain_text',
+                text: 'Time from',
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'HH:mm (e.g. 14:30)',
+                },
+                initial_value: initialTime,
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'sl_reason',
+              label: {
+                type: 'plain_text',
+                text: 'Reason',
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+                multiline: true,
+              },
+            },
+          ],
+        },
+      })
+
+      // Respond quickly (Slack just needs 200 OK)
+      return new NextResponse('', { status: 200 })
+    }
+
     // Handle /daily-report command
     if (command === '/daily-report') {
       await slackClient.views.open({
@@ -408,7 +502,7 @@ export async function POST(req: NextRequest) {
     // Unknown command
     return NextResponse.json({
       response_type: 'ephemeral',
-      text: `Unknown command: ${command}. Available commands: /check-in, /checkout, /leave-req, /daily-report, /overtime-req`,
+      text: `Unknown command: ${command}. Available commands: /check-in, /checkout, /leave-req, /daily-report, /overtime-req, /short-leave-req`,
     })
   } catch (err) {
     console.error('Error in /api/slack/commands', err)
