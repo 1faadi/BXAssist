@@ -685,12 +685,75 @@ export async function appendOvertimeRequestRow(args: {
 }
 
 /**
+ * Get overtime request by channelId and messageTs
+ * 
+ * Returns the overtime request row data for authorization checks.
+ * 
+ * Columns A-M: Timestamp | SlackUserId | EmployeeName | ProjectName | AssignedByUserId | Hours | Minutes | Reason | Status | DecisionBy | DecisionAt | SlackMessageTs | SlackChannelId
+ */
+export async function getOvertimeRequestByKey(args: {
+  channelId: string
+  messageTs: string
+}): Promise<{
+  timestamp: string
+  slackUserId: string
+  employeeName: string
+  projectName: string
+  assignedByUserId: string
+  hours: number
+  minutes: number
+  reason: string
+  status: string
+  decisionBy: string
+  decisionAt: string
+  slackMessageTs: string
+  slackChannelId: string
+} | null> {
+  const { channelId, messageTs } = args
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'OvertimeRequests!A2:M10000', // skip header, columns A-M
+  })
+
+  const rows = res.data.values || []
+
+  for (const row of rows) {
+    const ts = row[11] // SlackMessageTs (L)
+    const ch = row[12] // SlackChannelId (M)
+    if (ts === messageTs && ch === channelId) {
+      // Ensure row has all 13 columns (A-M)
+      const fullRow = [...row]
+      while (fullRow.length < 13) fullRow.push('')
+
+      return {
+        timestamp: fullRow[0] || '',
+        slackUserId: fullRow[1] || '',
+        employeeName: fullRow[2] || '',
+        projectName: fullRow[3] || '',
+        assignedByUserId: fullRow[4] || '',
+        hours: Number(fullRow[5]) || 0,
+        minutes: Number(fullRow[6]) || 0,
+        reason: fullRow[7] || '',
+        status: fullRow[8] || '',
+        decisionBy: fullRow[9] || '',
+        decisionAt: fullRow[10] || '',
+        slackMessageTs: fullRow[11] || '',
+        slackChannelId: fullRow[12] || '',
+      }
+    }
+  }
+
+  return null
+}
+
+/**
  * Set overtime decision (Approve or Reject) in Google Sheets
  * 
  * Finds the overtime request by channelId and messageTs, then updates:
- * - Status (G) to "Approved" or "Rejected"
- * - DecisionBy (H) to the approver's name
- * - DecisionAt (I) to current ISO timestamp
+ * - Status (I) to "Approved" or "Rejected"
+ * - DecisionBy (J) to the approver's name
+ * - DecisionAt (K) to current ISO timestamp
  * 
  * Returns decision info plus requester details for DM notification.
  * 
@@ -788,115 +851,3 @@ export async function setOvertimeDecision(args: {
   }
 }
 
-/**
- * Overtime Approver Messages Tab Helpers
- * 
- * OvertimeApproverMessages tab structure:
- * A: RequestKey (format: "channelId:messageTs")
- * B: ApproverUserId
- * C: ImChannelId (DM channel ID)
- * D: MessageTs (DM message timestamp)
- * E: Status (pending, closed:approved, closed:rejected)
- * Header row: A1="RequestKey", B1="ApproverUserId", etc.
- */
-
-/**
- * Add a new approver DM message record
- */
-export async function addOvertimeApproverMessage(args: {
-  requestKey: string
-  approverUserId: string
-  imChannelId: string
-  messageTs: string
-}): Promise<void> {
-  const { requestKey, approverUserId, imChannelId, messageTs } = args
-
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
-    range: 'OvertimeApproverMessages!A1',
-    valueInputOption: 'RAW',
-    requestBody: {
-      values: [
-        [
-          requestKey, // A: RequestKey
-          approverUserId, // B: ApproverUserId
-          imChannelId, // C: ImChannelId
-          messageTs, // D: MessageTs
-          'pending', // E: Status
-        ],
-      ],
-    },
-  })
-}
-
-/**
- * Get all approver DM messages for a request key
- */
-export async function getOvertimeApproverMessages(
-  requestKey: string
-): Promise<
-  Array<{
-    approverUserId: string
-    imChannelId: string
-    messageTs: string
-    status: string
-  }>
-> {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: 'OvertimeApproverMessages!A2:E10000', // skip header, columns A-E
-  })
-
-  const rows = res.data.values || []
-  const messages: Array<{
-    approverUserId: string
-    imChannelId: string
-    messageTs: string
-    status: string
-  }> = []
-
-  for (const row of rows) {
-    if (row[0] === requestKey) {
-      messages.push({
-        approverUserId: row[1] || '', // ApproverUserId (B)
-        imChannelId: row[2] || '', // ImChannelId (C)
-        messageTs: row[3] || '', // MessageTs (D)
-        status: row[4] || 'pending', // Status (E)
-      })
-    }
-  }
-
-  return messages
-}
-
-/**
- * Mark all approver messages as closed for a request key
- */
-export async function markOvertimeApproverMessagesClosed(
-  requestKey: string,
-  status: 'approved' | 'rejected'
-): Promise<void> {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: 'OvertimeApproverMessages!A2:E10000', // skip header, columns A-E
-  })
-
-  const rows = res.data.values || []
-  const closedStatus = `closed:${status}`
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]
-    if (row[0] === requestKey && row[4] === 'pending') {
-      // Update status column (E)
-      const rowIndex = i + 2 // Convert to 1-based, accounting for header
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `OvertimeApproverMessages!E${rowIndex}`,
-        valueInputOption: 'RAW',
-        requestBody: {
-          values: [[closedStatus]],
-        },
-      })
-    }
-  }
-}
