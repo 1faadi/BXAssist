@@ -374,13 +374,13 @@ export async function POST(req: NextRequest) {
                 text: 'Time from',
               },
               element: {
-                type: 'plain_text_input',
+                type: 'timepicker',
                 action_id: 'value',
                 placeholder: {
                   type: 'plain_text',
-                  text: 'HH:mm (e.g. 14:30)',
+                  text: 'Select time',
                 },
-                initial_value: initialTime,
+                initial_time: initialTime,
               },
             },
             {

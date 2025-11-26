@@ -517,7 +517,7 @@ export async function POST(req: NextRequest) {
       // Extract form values
       const fromDate: string = state.sl_from_date.value.selected_date
       const toDate: string = state.sl_to_date.value.selected_date
-      const timeFrom: string = state.sl_time_from.value.value.trim()
+      const timeFrom: string = state.sl_time_from.value.selected_time // HH:mm format from timepicker
       const reason: string = state.sl_reason.value.value
 
       // Validate dates
@@ -526,28 +526,6 @@ export async function POST(req: NextRequest) {
           response_action: 'errors',
           errors: {
             sl_to_date: 'End date must be on or after start date',
-          },
-        })
-      }
-
-      // Validate time format (HH:mm)
-      const timeRegex = /^\d{2}:\d{2}$/
-      if (!timeRegex.test(timeFrom)) {
-        return NextResponse.json({
-          response_action: 'errors',
-          errors: {
-            sl_time_from: 'Time must be in HH:mm format (e.g. 14:30)',
-          },
-        })
-      }
-
-      // Validate time values
-      const [hours, minutes] = timeFrom.split(':').map(Number)
-      if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
-        return NextResponse.json({
-          response_action: 'errors',
-          errors: {
-            sl_time_from: 'Invalid time. Hours must be 00-23, minutes must be 00-59',
           },
         })
       }
