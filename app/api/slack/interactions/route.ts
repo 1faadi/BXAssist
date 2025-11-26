@@ -344,54 +344,54 @@ export async function POST(req: NextRequest) {
 
       // Build channel message blocks (NO buttons - visible to everyone)
       const channelMessageBlocks = [
-        {
-          type: 'header',
-          text: {
-            type: 'plain_text',
-            text: '⏱️ Overtime Request',
+          {
+            type: 'header',
+            text: {
+              type: 'plain_text',
+              text: '⏱️ Overtime Request',
+            },
           },
-        },
-        {
-          type: 'section',
-          fields: [
-            {
-              type: 'mrkdwn',
-              text: `*Employee:*\n<@${requesterId}>`,
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Project:*\n${projectName}`,
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Assigned by:*\n<@${assignedByUserId}>`,
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Duration:*\n${durationText}`,
-            },
-          ],
-        },
-        ...(reason
-          ? ([
+          {
+            type: 'section',
+            fields: [
               {
-                type: 'section',
-                text: {
-                  type: 'mrkdwn',
-                  text: `*Task / Reason:*\n${reason}`,
-                },
+                type: 'mrkdwn',
+                text: `*Employee:*\n<@${requesterId}>`,
               },
-            ] as any[])
-          : []),
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
+              {
+                type: 'mrkdwn',
+                text: `*Project:*\n${projectName}`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Assigned by:*\n<@${assignedByUserId}>`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Duration:*\n${durationText}`,
+              },
+            ],
+          },
+          ...(reason
+            ? ([
+                {
+                  type: 'section',
+                  text: {
+                    type: 'mrkdwn',
+                    text: `*Task / Reason:*\n${reason}`,
+                  },
+                },
+              ] as any[])
+            : []),
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
               text: `*Status:* Pending approval (waiting for <@${assignedByUserId}>)`,
-            },
-          ],
-        },
+              },
+            ],
+          },
       ]
 
       // Post ONE message to overtime channel (NO buttons)
@@ -576,175 +576,107 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      // Build channel message blocks (WITH buttons - visible to everyone)
-      const channelMessageBlocks = [
-        {
-          type: 'header',
-          text: {
-            type: 'plain_text',
-            text: '🕒 Short Leave Request',
+      // Build channel message blocks function (will be reused for update with buttons)
+      const buildChannelMessageBlocks = (includeButtons: boolean, messageTs?: string) => {
+        const blocks: any[] = [
+          {
+            type: 'header',
+            text: {
+              type: 'plain_text',
+              text: '🕒 Short Leave Request',
+            },
           },
-        },
-        {
-          type: 'section',
-          fields: [
-            {
-              type: 'mrkdwn',
-              text: `*Employee:*\n<@${requesterId}>`,
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Dates:*\n${fromDate} → ${toDate}`,
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Time from:*\n${timeFrom}`,
-            },
-          ],
-        },
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `*Reason:*\n${reason}`,
+          {
+            type: 'section',
+            fields: [
+              {
+                type: 'mrkdwn',
+                text: `*Employee:*\n<@${requesterId}>`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Dates:*\n${fromDate} → ${toDate}`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Time from:*\n${timeFrom}`,
+              },
+            ],
           },
-        },
-        {
-          type: 'context',
-          elements: [
-            {
+          {
+            type: 'section',
+            text: {
               type: 'mrkdwn',
-              text: '*Status:* Pending approval',
+              text: `*Reason:*\n${reason}`,
             },
-          ],
-        },
-        {
-          type: 'actions',
-          block_id: 'sl_decision',
-          elements: [
-            {
-              type: 'button',
-              style: 'primary',
-              text: {
-                type: 'plain_text',
-                text: 'Approve',
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '*Status:* Pending approval',
               },
-              action_id: 'sl_approve',
-              value: JSON.stringify({
-                channelId: '', // Will be set after message is posted
-                messageTs: '', // Will be set after message is posted
-              }),
-            },
-            {
-              type: 'button',
-              style: 'danger',
-              text: {
-                type: 'plain_text',
-                text: 'Reject',
-              },
-              action_id: 'sl_reject',
-              value: JSON.stringify({
-                channelId: '', // Will be set after message is posted
-                messageTs: '', // Will be set after message is posted
-              }),
-            },
-          ],
-        },
-      ]
+            ],
+          },
+        ]
 
-      // Post ONE message to short leave channel (WITH buttons)
+        // Add actions block with buttons if requested
+        if (includeButtons && messageTs) {
+          blocks.push({
+            type: 'actions',
+            block_id: 'sl_decision',
+            elements: [
+              {
+                type: 'button',
+                style: 'primary',
+                text: {
+                  type: 'plain_text',
+                  text: 'Approve',
+                },
+                action_id: 'sl_approve',
+                value: JSON.stringify({
+                  channelId: shortLeaveChannelId,
+                  messageTs: messageTs,
+                }),
+              },
+              {
+                type: 'button',
+                style: 'danger',
+                text: {
+                  type: 'plain_text',
+                  text: 'Reject',
+                },
+                action_id: 'sl_reject',
+                value: JSON.stringify({
+                  channelId: shortLeaveChannelId,
+                  messageTs: messageTs,
+                }),
+              },
+            ],
+          })
+        }
+
+        return blocks
+      }
+
+      // Post message to short leave channel (NO buttons initially)
       const message = await slackClient.chat.postMessage({
         channel: shortLeaveChannelId,
         text: `🕒 Short Leave Request from <@${requesterId}>`, // fallback
-        blocks: channelMessageBlocks as any,
+        blocks: buildChannelMessageBlocks(false) as any,
       })
 
       const ts = message.ts as string
       const channelId = message.channel as string
       const nowIso = new Date().toISOString()
 
-      // Update button values with actual channelId and messageTs
-      const updatedChannelMessageBlocks = [
-        {
-          type: 'header',
-          text: {
-            type: 'plain_text',
-            text: '🕒 Short Leave Request',
-          },
-        },
-        {
-          type: 'section',
-          fields: [
-            {
-              type: 'mrkdwn',
-              text: `*Employee:*\n<@${requesterId}>`,
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Dates:*\n${fromDate} → ${toDate}`,
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Time from:*\n${timeFrom}`,
-            },
-          ],
-        },
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `*Reason:*\n${reason}`,
-          },
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: '*Status:* Pending approval',
-            },
-          ],
-        },
-        {
-          type: 'actions',
-          block_id: 'sl_decision',
-          elements: [
-            {
-              type: 'button',
-              style: 'primary',
-              text: {
-                type: 'plain_text',
-                text: 'Approve',
-              },
-              action_id: 'sl_approve',
-              value: JSON.stringify({
-                channelId: channelId,
-                messageTs: ts,
-              }),
-            },
-            {
-              type: 'button',
-              style: 'danger',
-              text: {
-                type: 'plain_text',
-                text: 'Reject',
-              },
-              action_id: 'sl_reject',
-              value: JSON.stringify({
-                channelId: channelId,
-                messageTs: ts,
-              }),
-            },
-          ],
-        },
-      ]
-
-      // Update message with correct button values
+      // Update message to add buttons with correct messageTs
       await slackClient.chat.update({
         channel: channelId,
         ts: ts,
         text: `🕒 Short Leave Request from <@${requesterId}>`,
-        blocks: updatedChannelMessageBlocks as any,
+        blocks: buildChannelMessageBlocks(true, ts) as any,
       })
 
       // Save to Google Sheets
@@ -890,37 +822,37 @@ export async function POST(req: NextRequest) {
         // New decision - update channel message and DM requester
         // 1. Update the overtime channel message (show status - no buttons to remove)
         const updatedChannelBlocks = [
-          {
-            type: 'header',
-            text: {
-              type: 'plain_text',
+              {
+                type: 'header',
+                text: {
+                  type: 'plain_text',
               text: '⏱️ Overtime Request',
-            },
-          },
-          {
-            type: 'section',
-            fields: [
-              {
-                type: 'mrkdwn',
-                text: `*Employee:*\n<@${requesterId}>`,
+                },
               },
               {
-                type: 'mrkdwn',
-                text: `*Project:*\n${projectName}`,
-              },
+                type: 'section',
+                fields: [
+                  {
+                    type: 'mrkdwn',
+                    text: `*Employee:*\n<@${requesterId}>`,
+                  },
+                  {
+                    type: 'mrkdwn',
+                    text: `*Project:*\n${projectName}`,
+                  },
               {
                 type: 'mrkdwn',
                 text: `*Assigned by:*\n<@${assignedByUserId}>`,
               },
-              {
-                type: 'mrkdwn',
-                text: `*Duration:*\n${durationText}`,
-              },
+                  {
+                    type: 'mrkdwn',
+                    text: `*Duration:*\n${durationText}`,
+                  },
             ],
           },
           ...(reason
             ? ([
-                {
+                  {
                   type: 'section',
                   text: {
                     type: 'mrkdwn',
@@ -935,9 +867,9 @@ export async function POST(req: NextRequest) {
               {
                 type: 'mrkdwn',
                 text: `*Status:* ${status} by <@${approverId}> at ${decisionTime} (PKT)`,
+                  },
+                ],
               },
-            ],
-          },
         ]
 
         // Update channel message (status only, no buttons to remove)
@@ -1006,17 +938,17 @@ export async function POST(req: NextRequest) {
                       },
                     ] as any[])
                   : []),
-                {
-                  type: 'context',
-                  elements: [
-                    {
-                      type: 'mrkdwn',
+              {
+                type: 'context',
+                elements: [
+                  {
+                    type: 'mrkdwn',
                       text: `Decision made at ${decisionTime} (PKT)`,
-                    },
-                  ],
-                },
-              ] as any,
-            })
+                  },
+                ],
+              },
+            ] as any,
+          })
           }
         } catch (dmError) {
           // Log but don't fail if DM fails
@@ -1054,33 +986,23 @@ export async function POST(req: NextRequest) {
             channelId = valueData.channelId
             messageTs = valueData.messageTs
           } catch {
-            // If already decided, update the clicked DM
-            const clickedDmChannelId = payload.container?.channel_id || payload.channel?.id || ''
-            const clickedDmMessageTs = payload.container?.message_ts || payload.message?.ts || ''
-            if (clickedDmChannelId && clickedDmMessageTs) {
-              await slackClient.chat.update({
-                channel: clickedDmChannelId,
-                ts: clickedDmMessageTs,
-                text: '❌ Invalid request data',
-                blocks: [
-                  {
-                    type: 'section',
-                    text: {
-                      type: 'mrkdwn',
-                      text: '❌ Invalid request data. Please try again.',
-                    },
-                  },
-                ] as any,
-              })
-            }
-            return new NextResponse('', { status: 200 })
+            return NextResponse.json({
+              response_type: 'ephemeral',
+              text: '❌ Invalid request data. Please try again.',
+            })
           }
         } else {
-          return new NextResponse('', { status: 200 })
+          return NextResponse.json({
+            response_type: 'ephemeral',
+            text: '❌ Missing request data. Please try again.',
+          })
         }
 
         if (!channelId || !messageTs) {
-          return new NextResponse('', { status: 200 })
+          return NextResponse.json({
+            response_type: 'ephemeral',
+            text: '❌ Invalid request data. Please try again.',
+          })
         }
 
         // Determine decision
@@ -1117,16 +1039,16 @@ export async function POST(req: NextRequest) {
           minute: '2-digit',
         })
 
-        // If already decided, return ephemeral message
+        // If already decided, return ephemeral message to clicker
         if (alreadyDecided) {
           return NextResponse.json({
             response_type: 'ephemeral',
-            text: `⚠️ This short leave request has already been ${status.toLowerCase()} by <@${decidedById}> at ${decisionTime} (PKT).`,
+            text: `⚠️ Already decided: ${status} by <@${decidedById}>`,
           })
         }
 
         // New decision - update channel message (remove buttons) and DM requester
-        // 1. Update the main channel message (remove buttons, show status)
+        // 1. Update the channel message (remove actions block, show status)
         const updatedChannelBlocks = [
           {
             type: 'header',
@@ -1170,7 +1092,7 @@ export async function POST(req: NextRequest) {
           },
         ]
 
-        // Update main channel message (buttons removed by not including actions block)
+        // Update channel message (buttons removed by not including actions block)
         await slackClient.chat.update({
           channel: channelId,
           ts: messageTs,
