@@ -28,9 +28,6 @@ import {
   getOvertimeRequestByKey,
   appendShortLeaveRequestRow,
   setShortLeaveDecision,
-  addShortLeaveApproverMessage,
-  getShortLeaveApproverMessages,
-  closeShortLeaveApproverMessages,
 } from '@/lib/googleSheets'
 
 const LEAVE_CHANNEL_ID = process.env.SLACK_LEAVE_CHANNEL_ID
@@ -579,7 +576,7 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      // Build channel message blocks (NO buttons - visible to everyone)
+      // Build channel message blocks (WITH buttons - visible to everyone)
       const channelMessageBlocks = [
         {
           type: 'header',
@@ -621,9 +618,41 @@ export async function POST(req: NextRequest) {
             },
           ],
         },
+        {
+          type: 'actions',
+          block_id: 'sl_decision',
+          elements: [
+            {
+              type: 'button',
+              style: 'primary',
+              text: {
+                type: 'plain_text',
+                text: 'Approve',
+              },
+              action_id: 'sl_approve',
+              value: JSON.stringify({
+                channelId: '', // Will be set after message is posted
+                messageTs: '', // Will be set after message is posted
+              }),
+            },
+            {
+              type: 'button',
+              style: 'danger',
+              text: {
+                type: 'plain_text',
+                text: 'Reject',
+              },
+              action_id: 'sl_reject',
+              value: JSON.stringify({
+                channelId: '', // Will be set after message is posted
+                messageTs: '', // Will be set after message is posted
+              }),
+            },
+          ],
+        },
       ]
 
-      // Post ONE message to short leave channel (NO buttons)
+      // Post ONE message to short leave channel (WITH buttons)
       const message = await slackClient.chat.postMessage({
         channel: shortLeaveChannelId,
         text: `🕒 Short Leave Request from <@${requesterId}>`, // fallback
@@ -633,7 +662,90 @@ export async function POST(req: NextRequest) {
       const ts = message.ts as string
       const channelId = message.channel as string
       const nowIso = new Date().toISOString()
-      const requestKey = `${channelId}:${ts}`
+
+      // Update button values with actual channelId and messageTs
+      const updatedChannelMessageBlocks = [
+        {
+          type: 'header',
+          text: {
+            type: 'plain_text',
+            text: '🕒 Short Leave Request',
+          },
+        },
+        {
+          type: 'section',
+          fields: [
+            {
+              type: 'mrkdwn',
+              text: `*Employee:*\n<@${requesterId}>`,
+            },
+            {
+              type: 'mrkdwn',
+              text: `*Dates:*\n${fromDate} → ${toDate}`,
+            },
+            {
+              type: 'mrkdwn',
+              text: `*Time from:*\n${timeFrom}`,
+            },
+          ],
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*Reason:*\n${reason}`,
+          },
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: '*Status:* Pending approval',
+            },
+          ],
+        },
+        {
+          type: 'actions',
+          block_id: 'sl_decision',
+          elements: [
+            {
+              type: 'button',
+              style: 'primary',
+              text: {
+                type: 'plain_text',
+                text: 'Approve',
+              },
+              action_id: 'sl_approve',
+              value: JSON.stringify({
+                channelId: channelId,
+                messageTs: ts,
+              }),
+            },
+            {
+              type: 'button',
+              style: 'danger',
+              text: {
+                type: 'plain_text',
+                text: 'Reject',
+              },
+              action_id: 'sl_reject',
+              value: JSON.stringify({
+                channelId: channelId,
+                messageTs: ts,
+              }),
+            },
+          ],
+        },
+      ]
+
+      // Update message with correct button values
+      await slackClient.chat.update({
+        channel: channelId,
+        ts: ts,
+        text: `🕒 Short Leave Request from <@${requesterId}>`,
+        blocks: updatedChannelMessageBlocks as any,
+      })
 
       // Save to Google Sheets
       await appendShortLeaveRequestRow({
@@ -648,137 +760,6 @@ export async function POST(req: NextRequest) {
         slackMessageTs: ts,
         slackChannelId: channelId,
       })
-
-      // Get all channel members (approvers)
-      let allMembers: string[] = []
-      try {
-        let cursor: string | undefined
-        do {
-          const membersResponse = await slackClient.conversations.members({
-            channel: shortLeaveChannelId,
-            cursor,
-            limit: 200,
-          })
-          if (membersResponse.members) {
-            allMembers = allMembers.concat(membersResponse.members)
-          }
-          cursor = membersResponse.response_metadata?.next_cursor
-        } while (cursor)
-      } catch (error) {
-        console.warn('Could not fetch channel members, skipping approver DMs:', error)
-        // Continue without DMs if we can't get members
-      }
-
-      // Send DM with buttons to each approver
-      for (let i = 0; i < allMembers.length; i++) {
-        const approverId = allMembers[i]
-        // Skip the requester themselves
-        if (approverId === requesterId) continue
-
-        try {
-          // Open DM channel
-          const dmResponse = await slackClient.conversations.open({
-            users: approverId,
-          })
-
-          if (!dmResponse.channel?.id) {
-            console.warn(`Could not open DM with approver ${approverId}`)
-            continue
-          }
-
-          const imChannelId = dmResponse.channel.id
-
-          // Build approver DM blocks with buttons
-          const approverDMBlocks = [
-            {
-              type: 'header',
-              text: {
-                type: 'plain_text',
-                text: '🕒 Short Leave Approval Required',
-              },
-            },
-            {
-              type: 'section',
-              fields: [
-                {
-                  type: 'mrkdwn',
-                  text: `*Employee:*\n<@${requesterId}>`,
-                },
-                {
-                  type: 'mrkdwn',
-                  text: `*Dates:*\n${fromDate} → ${toDate}`,
-                },
-                {
-                  type: 'mrkdwn',
-                  text: `*Time from:*\n${timeFrom}`,
-                },
-              ],
-            },
-            {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: `*Reason:*\n${reason}`,
-              },
-            },
-            {
-              type: 'actions',
-              block_id: 'sl_decision',
-              elements: [
-                {
-                  type: 'button',
-                  style: 'primary',
-                  text: {
-                    type: 'plain_text',
-                    text: 'Approve',
-                  },
-                  action_id: 'sl_approve',
-                  value: JSON.stringify({
-                    channelId: channelId,
-                    messageTs: ts,
-                  }),
-                },
-                {
-                  type: 'button',
-                  style: 'danger',
-                  text: {
-                    type: 'plain_text',
-                    text: 'Reject',
-                  },
-                  action_id: 'sl_reject',
-                  value: JSON.stringify({
-                    channelId: channelId,
-                    messageTs: ts,
-                  }),
-                },
-              ],
-            },
-          ]
-
-          // Send DM with buttons
-          const dmMessage = await slackClient.chat.postMessage({
-            channel: imChannelId,
-            text: 'Short leave approval required',
-            blocks: approverDMBlocks as any,
-          })
-
-          // Store DM message info in Google Sheets
-          await addShortLeaveApproverMessage({
-            requestKey,
-            approverUserId: approverId,
-            imChannelId,
-            messageTs: dmMessage.ts as string,
-          })
-
-          // Small delay to avoid rate limits
-          if (i < allMembers.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 150))
-          }
-        } catch (dmError) {
-          // Ignore errors for individual approvers
-          console.warn(`Could not send DM to approver ${approverId}:`, dmError)
-        }
-      }
 
       // Close modal
       return NextResponse.json({ response_action: 'clear' })
@@ -1136,65 +1117,16 @@ export async function POST(req: NextRequest) {
           minute: '2-digit',
         })
 
-        // Get the clicked DM channel/ts
-        const clickedDmChannelId = payload.container?.channel_id || payload.channel?.id || ''
-        const clickedDmMessageTs = payload.container?.message_ts || payload.message?.ts || ''
-
-        // If already decided, update the clicked DM only
+        // If already decided, return ephemeral message
         if (alreadyDecided) {
-          if (clickedDmChannelId && clickedDmMessageTs) {
-            const emoji = status === 'Approved' ? '✅' : '❌'
-            await slackClient.chat.update({
-              channel: clickedDmChannelId,
-              ts: clickedDmMessageTs,
-              text: `⚠️ Already decided: ${status}`,
-              blocks: [
-                {
-                  type: 'header',
-                  text: {
-                    type: 'plain_text',
-                    text: `${emoji} Short Leave ${status}`,
-                  },
-                },
-                {
-                  type: 'section',
-                  fields: [
-                    {
-                      type: 'mrkdwn',
-                      text: `*Employee:*\n<@${requesterId}>`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Dates:*\n${fromDate} → ${toDate}`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Time from:*\n${timeFrom}`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Status:*\n${status} by <@${decidedById}>`,
-                    },
-                  ],
-                },
-                {
-                  type: 'context',
-                  elements: [
-                    {
-                      type: 'mrkdwn',
-                      text: `⚠️ This request was already ${status.toLowerCase()} at ${decisionTime} (PKT)`,
-                    },
-                  ],
-                },
-              ] as any,
-            })
-          }
-          // Return 200 (idempotent - no new actions)
-          return new NextResponse('', { status: 200 })
+          return NextResponse.json({
+            response_type: 'ephemeral',
+            text: `⚠️ This short leave request has already been ${status.toLowerCase()} by <@${decidedById}> at ${decisionTime} (PKT).`,
+          })
         }
 
-        // New decision - update channel message, DM requester, and update all approver DMs
-        // 1. Update the main channel message (show status)
+        // New decision - update channel message (remove buttons) and DM requester
+        // 1. Update the main channel message (remove buttons, show status)
         const updatedChannelBlocks = [
           {
             type: 'header',
@@ -1238,7 +1170,7 @@ export async function POST(req: NextRequest) {
           },
         ]
 
-        // Update main channel message
+        // Update main channel message (buttons removed by not including actions block)
         await slackClient.chat.update({
           channel: channelId,
           ts: messageTs,
@@ -1312,82 +1244,6 @@ export async function POST(req: NextRequest) {
           // Log but don't fail if DM fails
           console.warn(`Could not send DM to requester ${requesterId}:`, dmError)
         }
-
-        // 3. Update ALL approver DM messages
-        const requestKey = `${channelId}:${messageTs}`
-        const approverMessages = await getShortLeaveApproverMessages(requestKey)
-        const emoji = status === 'Approved' ? '✅' : '❌'
-        const headerText = status === 'Approved' ? 'Short Leave Approved' : 'Short Leave Rejected'
-
-        for (let i = 0; i < approverMessages.length; i++) {
-          const msg = approverMessages[i]
-          try {
-            await slackClient.chat.update({
-              channel: msg.imChannelId,
-              ts: msg.messageTs,
-              text: `${emoji} ${headerText}`,
-              blocks: [
-                {
-                  type: 'header',
-                  text: {
-                    type: 'plain_text',
-                    text: `${emoji} ${headerText}`,
-                  },
-                },
-                {
-                  type: 'section',
-                  fields: [
-                    {
-                      type: 'mrkdwn',
-                      text: `*Employee:*\n<@${requesterId}>`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Dates:*\n${fromDate} → ${toDate}`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Time from:*\n${timeFrom}`,
-                    },
-                    {
-                      type: 'mrkdwn',
-                      text: `*Status:*\n${status} by <@${approverId}>`,
-                    },
-                  ],
-                },
-                {
-                  type: 'section',
-                  text: {
-                    type: 'mrkdwn',
-                    text: `*Reason:*\n${reason}`,
-                  },
-                },
-                {
-                  type: 'context',
-                  elements: [
-                    {
-                      type: 'mrkdwn',
-                      text: `Decision saved. Decided by <@${approverId}> at ${decisionTime} (PKT)`,
-                    },
-                  ],
-                },
-              ] as any,
-            })
-
-            // Small delay to avoid rate limits
-            if (i < approverMessages.length - 1) {
-              await new Promise((resolve) => setTimeout(resolve, 150))
-            }
-          } catch (updateError) {
-            console.warn(
-              `Could not update approver DM ${msg.approverUserId}:`,
-              updateError
-            )
-          }
-        }
-
-        // Mark all approver messages as closed
-        await closeShortLeaveApproverMessages(requestKey, status)
 
         // Return 200 (idempotent - no response needed)
         return new NextResponse('', { status: 200 })
