@@ -491,6 +491,10 @@ export async function POST(req: NextRequest) {
                 type: 'plain_text_input',
                 action_id: 'value',
                 multiline: true,
+                placeholder: {
+                  type: 'plain_text',
+                  text: '• Task 1\n• Task 2\n• Task 3',
+                },
               },
             },
             {
@@ -505,6 +509,10 @@ export async function POST(req: NextRequest) {
                 type: 'plain_text_input',
                 action_id: 'value',
                 multiline: true,
+                placeholder: {
+                  type: 'plain_text',
+                  text: '• Plan item 1\n• Plan item 2',
+                },
               },
             },
           ],

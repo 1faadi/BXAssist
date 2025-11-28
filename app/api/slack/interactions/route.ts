@@ -29,6 +29,7 @@ import {
   appendShortLeaveRequestRow,
   setShortLeaveDecision,
 } from '@/lib/googleSheets'
+import { toBullets } from '@/lib/textFormat'
 
 const LEAVE_CHANNEL_ID = process.env.SLACK_LEAVE_CHANNEL_ID
 
@@ -175,6 +176,10 @@ export async function POST(req: NextRequest) {
       const progressText = state.dr_progress.value.value
       const tomorrowPlan = state.dr_tomorrow?.value?.value ?? ''
 
+      // Format text fields as bullet points
+      const formattedProgress = toBullets(progressText)
+      const formattedTomorrowPlan = tomorrowPlan.trim() ? toBullets(tomorrowPlan) : ''
+
       // Get reporter info
       const reporterId: string = payload.user.id
       const userInfo = await slackClient.users.info({ user: reporterId })
@@ -236,18 +241,18 @@ export async function POST(req: NextRequest) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `*Tasks / Progress:*\n${progressText}`,
+            text: `*Tasks / Progress:*\n${formattedProgress}`,
           },
         },
       ]
 
       // Add tomorrow's plan if provided
-      if (tomorrowPlan.trim()) {
+      if (formattedTomorrowPlan) {
         blocks.push({
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `*Tomorrow's Plan:*\n${tomorrowPlan}`,
+            text: `*Tomorrow's Plan:*\n${formattedTomorrowPlan}`,
           },
         })
       }
