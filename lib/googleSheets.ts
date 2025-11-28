@@ -1137,3 +1137,71 @@ export async function closeShortLeaveApproverMessages(
   }
 }
 
+/**
+ * Cron Logs Tab Helpers
+ * 
+ * CronLogs tab structure:
+ * A: JobName
+ * B: DatePKT (YYYY-MM-DD in Asia/Karachi)
+ * C: SentAtISO (ISO timestamp)
+ * D: SlackMessageTs
+ * Header row: A1="JobName", B1="DatePKT", C1="SentAtISO", D1="SlackMessageTs"
+ */
+
+/**
+ * Check if a cron job was already sent today
+ * 
+ * @param jobName - Name of the cron job (e.g., "daily-report-reminder")
+ * @param datePkt - Date in YYYY-MM-DD format (Asia/Karachi)
+ * @returns true if already sent, false otherwise
+ */
+export async function cronWasSentToday(
+  jobName: string,
+  datePkt: string
+): Promise<boolean> {
+  const range = 'CronLogs!A2:D10000'
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+  })
+
+  const rows = response.data.values || []
+  for (const row of rows) {
+    if (row[0] === jobName && row[1] === datePkt) {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
+ * Log a cron job send to CronLogs tab
+ * 
+ * @param args - Object containing jobName, datePkt, sentAtIso, and slackMessageTs
+ */
+export async function logCronSend(args: {
+  jobName: string
+  datePkt: string
+  sentAtIso: string
+  slackMessageTs: string
+}): Promise<void> {
+  const { jobName, datePkt, sentAtIso, slackMessageTs } = args
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'CronLogs!A1',
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [
+        [
+          jobName, // A: JobName
+          datePkt, // B: DatePKT
+          sentAtIso, // C: SentAtISO
+          slackMessageTs, // D: SlackMessageTs
+        ],
+      ],
+    },
+  })
+}
+
