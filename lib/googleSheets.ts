@@ -861,13 +861,14 @@ export async function setOvertimeDecision(args: {
  * D: FromDate (YYYY-MM-DD)
  * E: ToDate (YYYY-MM-DD)
  * F: TimeFrom (HH:mm)
- * G: Reason
- * H: Status (Pending, Approved, Rejected)
- * I: DecisionBy (approver user ID)
- * J: DecisionAt (ISO datetime)
- * K: SlackMessageTs
- * L: SlackChannelId
- * Header row: A1="Timestamp", B1="SlackUserId", etc.
+ * G: TimeTo (HH:mm)
+ * H: Reason
+ * I: Status (Pending, Approved, Rejected)
+ * J: DecisionBy (approver user ID)
+ * K: DecisionAt (ISO datetime)
+ * L: SlackMessageTs
+ * M: SlackChannelId
+ * Header row: A1="Timestamp", B1="SlackUserId", ..., M1="SlackChannelId"
  */
 
 /**
@@ -880,6 +881,7 @@ export async function appendShortLeaveRequestRow(args: {
   fromDate: string
   toDate: string
   timeFrom: string
+  timeTo: string
   reason: string
   status: 'Pending' | 'Approved' | 'Rejected'
   slackMessageTs: string
@@ -892,6 +894,7 @@ export async function appendShortLeaveRequestRow(args: {
     fromDate,
     toDate,
     timeFrom,
+  timeTo,
     reason,
     status,
     slackMessageTs,
@@ -911,12 +914,13 @@ export async function appendShortLeaveRequestRow(args: {
           fromDate, // D: FromDate
           toDate, // E: ToDate
           timeFrom, // F: TimeFrom
-          reason, // G: Reason
-          status, // H: Status
-          '', // I: DecisionBy (empty for new requests)
-          '', // J: DecisionAt (empty for new requests)
-          slackMessageTs, // K: SlackMessageTs
-          slackChannelId, // L: SlackChannelId
+          timeTo, // G: TimeTo
+          reason, // H: Reason
+          status, // I: Status
+          '', // J: DecisionBy (empty for new requests)
+          '', // K: DecisionAt (empty for new requests)
+          slackMessageTs, // L: SlackMessageTs
+          slackChannelId, // M: SlackChannelId
         ],
       ],
     },
@@ -927,13 +931,13 @@ export async function appendShortLeaveRequestRow(args: {
  * Set short leave decision (Approve or Reject) in Google Sheets
  * 
  * Finds the short leave request by channelId and messageTs, then updates:
- * - Status (H) to "Approved" or "Rejected"
- * - DecisionBy (I) to the approver's user ID
- * - DecisionAt (J) to current ISO timestamp
+ * - Status (I) to "Approved" or "Rejected"
+ * - DecisionBy (J) to the approver's user ID
+ * - DecisionAt (K) to current ISO timestamp
  * 
  * Returns decision info plus requester details for DM notification.
  * 
- * Columns A-L: Timestamp | SlackUserId | EmployeeName | FromDate | ToDate | TimeFrom | Reason | Status | DecisionBy | DecisionAt | SlackMessageTs | SlackChannelId
+ * Columns A-M: Timestamp | SlackUserId | EmployeeName | FromDate | ToDate | TimeFrom | TimeTo | Reason | Status | DecisionBy | DecisionAt | SlackMessageTs | SlackChannelId
  */
 export async function setShortLeaveDecision(args: {
   channelId: string
@@ -949,13 +953,14 @@ export async function setShortLeaveDecision(args: {
   fromDate: string
   toDate: string
   timeFrom: string
+  timeTo: string
   reason: string
 }> {
   const { channelId, messageTs, decision, decidedById } = args
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'ShortLeaveRequests!A2:L10000', // skip header, columns A-L
+    range: 'ShortLeaveRequests!A2:M10000', // skip header, columns A-M
   })
 
   const rows = res.data.values || []
@@ -964,8 +969,8 @@ export async function setShortLeaveDecision(args: {
   let row: string[] | undefined
 
   rows.forEach((r, idx) => {
-    const ts = r[10] // SlackMessageTs (K)
-    const ch = r[11] // SlackChannelId (L)
+    const ts = r[11] // SlackMessageTs (L)
+    const ch = r[12] // SlackChannelId (M)
     if (ts === messageTs && ch === channelId) {
       foundRowIndex = idx + 2 // because data starts at row 2
       row = r
@@ -976,35 +981,36 @@ export async function setShortLeaveDecision(args: {
     throw new Error('Short leave request row not found in sheet')
   }
 
-  // Ensure row has all 12 columns (A-L)
-  while (row.length < 12) row.push('')
+  // Ensure row has all 13 columns (A-M)
+  while (row.length < 13) row.push('')
 
   // Check if already decided
-  if (row[7] === 'Approved' || row[7] === 'Rejected') {
+  if (row[8] === 'Approved' || row[8] === 'Rejected') {
     // Return existing decision info with alreadyDecided flag
     return {
       alreadyDecided: true,
-      status: row[7] as 'Approved' | 'Rejected',
-      decidedById: row[8] || '', // DecisionBy (I)
-      decidedAtIso: row[9] || new Date().toISOString(), // DecisionAt (J)
+      status: row[8] as 'Approved' | 'Rejected',
+      decidedById: row[9] || '', // DecisionBy (J)
+      decidedAtIso: row[10] || new Date().toISOString(), // DecisionAt (K)
       requesterId: row[1], // SlackUserId (B)
       fromDate: row[3], // FromDate (D)
       toDate: row[4], // ToDate (E)
       timeFrom: row[5] || '', // TimeFrom (F)
-      reason: row[6] || '', // Reason (G)
+      timeTo: row[6] || '', // TimeTo (G)
+      reason: row[7] || '', // Reason (H)
     }
   }
 
   const decidedAt = new Date().toISOString()
 
   // Update columns
-  row[7] = decision // Status (H)
-  row[8] = decidedById // DecisionBy (I) - user ID
-  row[9] = decidedAt // DecisionAt (J)
+  row[8] = decision // Status (I)
+  row[9] = decidedById // DecisionBy (J) - user ID
+  row[10] = decidedAt // DecisionAt (K)
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: `ShortLeaveRequests!A${foundRowIndex}:L${foundRowIndex}`,
+    range: `ShortLeaveRequests!A${foundRowIndex}:M${foundRowIndex}`,
     valueInputOption: 'RAW',
     requestBody: {
       values: [row],
@@ -1020,7 +1026,8 @@ export async function setShortLeaveDecision(args: {
     fromDate: row[3], // FromDate (D)
     toDate: row[4], // ToDate (E)
     timeFrom: row[5] || '', // TimeFrom (F)
-    reason: row[6] || '', // Reason (G)
+    timeTo: row[6] || '', // TimeTo (G)
+    reason: row[7] || '', // Reason (H)
   }
 }
 

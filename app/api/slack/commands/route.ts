@@ -401,6 +401,22 @@ export async function POST(req: NextRequest) {
             },
             {
               type: 'input',
+              block_id: 'sl_time_to',
+              label: {
+                type: 'plain_text',
+                text: 'Time to',
+              },
+              element: {
+                type: 'timepicker',
+                action_id: 'value',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select time',
+                },
+              },
+            },
+            {
+              type: 'input',
               block_id: 'sl_reason',
               label: {
                 type: 'plain_text',

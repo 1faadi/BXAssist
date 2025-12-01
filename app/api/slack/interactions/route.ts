@@ -518,14 +518,14 @@ export async function POST(req: NextRequest) {
       payload.view?.callback_id === 'short_leave_request_modal'
     ) {
       const state = payload.view.state.values
-
       // Extract form values
       const fromDate: string = state.sl_from_date.value.selected_date
       const toDate: string = state.sl_to_date.value.selected_date
-      const timeFrom: string = state.sl_time_from.value.selected_time // HH:mm format from timepicker
+      const timeFrom: string | undefined = state.sl_time_from.value.selected_time // HH:mm
+      const timeTo: string | undefined = state.sl_time_to?.value?.selected_time // HH:mm
       const reason: string = state.sl_reason.value.value
 
-      // Validate dates
+      // Basic validation: dates
       if (fromDate > toDate) {
         return NextResponse.json({
           response_action: 'errors',
@@ -535,19 +535,56 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      // Validate time range: 9:00 AM to 6:00 PM (09:00 to 18:00)
-      const [hours, minutes] = timeFrom.split(':').map(Number)
-      const timeInMinutes = hours * 60 + minutes
+      // Validate times presence
+      if (!timeFrom || !timeTo) {
+        return NextResponse.json({
+          response_action: 'errors',
+          errors: {
+            sl_time_to: 'Both "Time from" and "Time to" are required.',
+          },
+        })
+      }
+
+      // Validate Slack timepicker format HH:mm
+      const timeRegex = /^\d{2}:\d{2}$/
+      if (!timeRegex.test(timeFrom) || !timeRegex.test(timeTo)) {
+        return NextResponse.json({
+          response_action: 'errors',
+          errors: {
+            sl_time_to: 'Invalid time format. Please select times in HH:mm.',
+          },
+        })
+      }
+
+      // Validate "Time from" within allowed range: 9:00 AM to 6:00 PM (09:00 to 18:00)
+      const [fromHours, fromMinutes] = timeFrom.split(':').map(Number)
+      const fromTotalMinutes = fromHours * 60 + fromMinutes
       const minTime = 9 * 60 // 09:00 = 540 minutes
       const maxTime = 18 * 60 // 18:00 = 1080 minutes
 
-      if (timeInMinutes < minTime || timeInMinutes > maxTime) {
+      if (fromTotalMinutes < minTime || fromTotalMinutes > maxTime) {
         return NextResponse.json({
           response_action: 'errors',
           errors: {
             sl_time_from: 'Time must be between 9:00 AM and 6:00 PM',
           },
         })
+      }
+
+      // If same date, ensure timeTo > timeFrom
+      if (fromDate === toDate) {
+        const [toHours, toMinutes] = timeTo.split(':').map(Number)
+        const toTotalMinutes = toHours * 60 + toMinutes
+
+        if (toTotalMinutes <= fromTotalMinutes) {
+          return NextResponse.json({
+            response_action: 'errors',
+            errors: {
+              sl_time_to:
+                'Time to must be after time from (same-day short leave).',
+            },
+          })
+        }
       }
 
       const requesterId: string = payload.user.id
@@ -597,7 +634,7 @@ export async function POST(req: NextRequest) {
               },
               {
                 type: 'mrkdwn',
-                text: `*Time from:*\n${timeFrom}`,
+                text: `*Time:*\n${timeFrom} → ${timeTo}`,
               },
             ],
           },
@@ -685,6 +722,7 @@ export async function POST(req: NextRequest) {
         fromDate,
         toDate,
         timeFrom,
+        timeTo,
         reason,
         status: 'Pending',
         slackMessageTs: ts,
@@ -1024,6 +1062,7 @@ export async function POST(req: NextRequest) {
           fromDate,
           toDate,
           timeFrom,
+        timeTo,
           reason,
         } = decisionResult
 
@@ -1068,7 +1107,7 @@ export async function POST(req: NextRequest) {
               },
               {
                 type: 'mrkdwn',
-                text: `*Time from:*\n${timeFrom}`,
+                text: `*Time:*\n${timeFrom} → ${timeTo}`,
               },
             ],
           },
@@ -1111,7 +1150,7 @@ export async function POST(req: NextRequest) {
 
             await slackClient.chat.postMessage({
               channel: dmResponse.channel.id,
-              text: `${emoji} Your short leave (${fromDate} → ${toDate}, from ${timeFrom}) has been ${status.toLowerCase()} by <@${approverId}>.`,
+              text: `${emoji} Your short leave (${fromDate} → ${toDate}, ${timeFrom} → ${timeTo}) has been ${status.toLowerCase()} by <@${approverId}>.`,
               blocks: [
                 {
                   type: 'header',
@@ -1129,7 +1168,7 @@ export async function POST(req: NextRequest) {
                     },
                     {
                       type: 'mrkdwn',
-                      text: `*Time from:*\n${timeFrom}`,
+                      text: `*Time:*\n${timeFrom} → ${timeTo}`,
                     },
                     {
                       type: 'mrkdwn',
