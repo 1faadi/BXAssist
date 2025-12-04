@@ -539,10 +539,67 @@ export async function POST(req: NextRequest) {
       return new NextResponse('', { status: 200 })
     }
 
+    // Handle /standup command
+    if (command === '/standup') {
+      await slackClient.views.open({
+        trigger_id: triggerId,
+        view: {
+          type: 'modal',
+          callback_id: 'standup_modal',
+          title: {
+            type: 'plain_text',
+            text: 'Standup',
+          },
+          submit: {
+            type: 'plain_text',
+            text: 'Send',
+          },
+          close: {
+            type: 'plain_text',
+            text: 'Cancel',
+          },
+          blocks: [
+            {
+              type: 'input',
+              block_id: 'su_project',
+              label: {
+                type: 'plain_text',
+                text: 'Project Name',
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'su_task',
+              label: {
+                type: 'plain_text',
+                text: "Today's Task",
+              },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+                multiline: true,
+                placeholder: {
+                  type: 'plain_text',
+                  text: '• Task 1\n• Task 2',
+                },
+              },
+            },
+          ],
+        },
+      })
+
+      // Respond quickly (Slack just needs 200 OK)
+      return new NextResponse('', { status: 200 })
+    }
+
     // Unknown command
     return NextResponse.json({
       response_type: 'ephemeral',
-      text: `Unknown command: ${command}. Available commands: /check-in, /checkout, /leave-req, /daily-report, /overtime-req, /short-leave-req`,
+      text: `Unknown command: ${command}. Available commands: /check-in, /checkout, /leave-req, /daily-report, /overtime-req, /short-leave-req, /standup`,
     })
   } catch (err) {
     console.error('Error in /api/slack/commands', err)

@@ -1212,3 +1212,63 @@ export async function logCronSend(args: {
   })
 }
 
+/**
+ * Standup Reports Tab Helpers
+ * 
+ * StandupReports tab structure:
+ * A: Timestamp
+ * B: DatePKT (YYYY-MM-DD in Asia/Karachi)
+ * C: SlackUserId
+ * D: EmployeeName
+ * E: ProjectName
+ * F: TodaysTask
+ * G: SlackMessageTs
+ * H: SlackChannelId
+ * Header row: A1="Timestamp", B1="DatePKT", etc.
+ */
+
+/**
+ * Append a new standup report row to Google Sheets
+ */
+export async function appendStandupRow(args: {
+  timestamp: string
+  datePkt: string
+  slackUserId: string
+  employeeName: string
+  projectName: string
+  todaysTask: string
+  slackMessageTs: string
+  slackChannelId: string
+}): Promise<void> {
+  const {
+    timestamp,
+    datePkt,
+    slackUserId,
+    employeeName,
+    projectName,
+    todaysTask,
+    slackMessageTs,
+    slackChannelId,
+  } = args
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'StandupReports!A1',
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [
+        [
+          timestamp, // A: Timestamp
+          datePkt, // B: DatePKT
+          slackUserId, // C: SlackUserId
+          employeeName, // D: EmployeeName
+          projectName, // E: ProjectName
+          todaysTask, // F: TodaysTask
+          slackMessageTs, // G: SlackMessageTs
+          slackChannelId, // H: SlackChannelId
+        ],
+      ],
+    },
+  })
+}
+

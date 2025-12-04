@@ -733,6 +733,127 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ response_action: 'clear' })
     }
 
+    // 2d) Handle standup modal submission
+    if (
+      payload.type === 'view_submission' &&
+      payload.view?.callback_id === 'standup_modal'
+    ) {
+      const state = payload.view.state.values
+
+      // Extract form values
+      const project: string = state.su_project.value.value
+      const taskRaw: string = state.su_task.value.value
+
+      // Validate
+      const errors: Record<string, string> = {}
+      if (!project || !project.trim()) {
+        errors.su_project = 'Project name is required'
+      }
+      if (!taskRaw || !taskRaw.trim()) {
+        errors.su_task = "Today's task is required"
+      }
+
+      if (Object.keys(errors).length > 0) {
+        return NextResponse.json({
+          response_action: 'errors',
+          errors,
+        })
+      }
+
+      // Format tasks into bullets
+      const formattedTasks = toBullets(taskRaw)
+
+      // Get PK date string (YYYY-MM-DD)
+      const { datePk, nowIso } = await import('@/lib/timePk').then((m) => m.nowPk())
+
+      const userId: string = payload.user.id
+
+      // Get employee's display name (for Google Sheets)
+      const userInfo = await slackClient.users.info({ user: userId })
+      const employeeName =
+        (userInfo.user?.profile as any)?.real_name ||
+        (userInfo.user?.profile as any)?.display_name ||
+        payload.user.username ||
+        userId
+
+      // Get standup channel ID
+      const standupChannelId = process.env.SLACK_STANDUP_CHANNEL_ID
+      if (!standupChannelId) {
+        return NextResponse.json(
+          {
+            response_action: 'errors',
+            errors: {
+              su_project: 'Standup channel not configured. Please contact admin.',
+            },
+          },
+          { status: 500 }
+        )
+      }
+
+      // Post message to standup channel
+      const message = await slackClient.chat.postMessage({
+        channel: standupChannelId,
+        text: `📣 Standup from <@${userId}>`, // fallback
+        blocks: [
+          {
+            type: 'header',
+            text: {
+              type: 'plain_text',
+              text: '📣 Standup',
+            },
+          },
+          {
+            type: 'section',
+            fields: [
+              {
+                type: 'mrkdwn',
+                text: `*Employee:*\n<@${userId}>`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Date:*\n${datePk} (PKT)`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Project:*\n${project}`,
+              },
+            ],
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `*Today's Task:*\n${formattedTasks}`,
+            },
+          },
+        ] as any,
+      })
+
+      const ts = message.ts as string
+      const channelId = message.channel as string
+
+      // Save to Google Sheets (optional)
+      try {
+        const { appendStandupRow } = await import('@/lib/googleSheets')
+        await appendStandupRow({
+          timestamp: nowIso,
+          datePkt: datePk,
+          slackUserId: userId,
+          employeeName,
+          projectName: project,
+          todaysTask: taskRaw, // Store raw task text, not formatted
+          slackMessageTs: ts,
+          slackChannelId: channelId,
+        })
+      } catch (sheetsError) {
+        // Log but don't fail if Sheets logging fails
+        console.warn('Could not save standup to Google Sheets:', sheetsError)
+      }
+
+      // Close modal
+      return NextResponse.json({ response_action: 'clear' })
+    }
+
     // 3) Handle button clicks (Approve/Reject)
     if (payload.type === 'block_actions') {
       const action = payload.actions?.[0]
