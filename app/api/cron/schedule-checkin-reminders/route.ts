@@ -125,34 +125,28 @@ export async function GET(req: NextRequest) {
         const scheduleResponse = await slackClient.chat.scheduleMessage({
           channel: imChannelId,
           post_at: postAt,
-          text: '⏰ Reminder: Please check-in (Office network required)',
+          text: '📣 Standup Reminder',
           blocks: [
+            {
+              type: 'header',
+              text: {
+                type: 'plain_text',
+                text: '📣 Standup Reminder',
+              },
+            },
             {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: '⏰ *Reminder: Please check-in*\n\nYou haven\'t checked in today. Click the button below to check-in (office network required).',
+                text: 'Please post your daily standup using */standup* now.',
               },
-            },
-            {
-              type: 'actions',
-              elements: [
-                {
-                  type: 'button',
-                  text: {
-                    type: 'plain_text',
-                    text: 'Open check-in page',
-                  },
-                  url: checkInUrl,
-                },
-              ],
             },
             {
               type: 'context',
               elements: [
                 {
                   type: 'mrkdwn',
-                  text: `Date: ${datePk} • Asia/Karachi time`,
+                  text: `Time: ${reminderTime} (PKT)`,
                 },
               ],
             },
