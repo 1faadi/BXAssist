@@ -1,7 +1,7 @@
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line
 const ZKLib = require('zklib-js')
 
 export async function GET() {

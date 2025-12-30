@@ -2,7 +2,7 @@ export const runtime = 'nodejs' // Ensure this runs in the Node.js runtime
 export const dynamic = 'force-dynamic'
 
 // zklib-js is CommonJS; use require to avoid ESM interop issues
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line
 const ZKLib = require('zklib-js')
 
 export async function GET() {

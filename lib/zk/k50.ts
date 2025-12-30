@@ -4,7 +4,7 @@
 import type { AttendanceLog, User as ZKUser } from './types'
 
 // zklib-js is CommonJS, so we require() to avoid bundler issues.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line
 const ZKLib = require('zklib-js')
 
 const DEFAULT_PORT = 4370
