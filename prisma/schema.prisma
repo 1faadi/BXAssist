@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Device {
+  id        Int       @id @default(autoincrement())
+  name      String
+  ip        String
+  port      Int       @default(4370)
+  timezone  String    @default("Asia/Karachi")
+  lastSync  DateTime?
+  isActive  Boolean   @default(true)
+
+  attendancesRaw   AttendanceRaw[]
+  attendancesDaily AttendanceDaily[]
+}
+
+model Employee {
+  id        Int      @id @default(autoincrement())
+  // UID on the physical device (enroll number / userId)
+  deviceUid Int      @unique
+  name      String?
+
+  attendancesRaw   AttendanceRaw[]
+  attendancesDaily AttendanceDaily[]
+}
+
+/// Raw punches fetched from the device (one row per punch)
+model AttendanceRaw {
+  id          Int       @id @default(autoincrement())
+  employeeId  Int
+  deviceId    Int
+  punchTime   DateTime  /// Stored in UTC
+  createdAt   DateTime  @default(now())
+
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+  device      Device    @relation(fields: [deviceId], references: [id])
+
+  @@index([punchTime])
+  @@index([employeeId, punchTime])
+}
+
+/// Aggregated daily attendance (check-in / check-out)
+model AttendanceDaily {
+  id          Int       @id @default(autoincrement())
+  employeeId  Int
+  deviceId    Int
+  // Start of day in device timezone, stored as UTC
+  date        DateTime
+  checkIn     DateTime?
+  checkOut    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @default(now())
+
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+  device      Device    @relation(fields: [deviceId], references: [id])
+
+  @@unique([employeeId, deviceId, date])
+  @@index([date])
+}
+
+
