@@ -958,21 +958,11 @@ export async function POST(req: NextRequest) {
           minute: '2-digit',
         })
 
-        // If already decided, replace ephemeral message and return
+        // If already decided, delete ephemeral message and return
         if (alreadyDecided) {
           return NextResponse.json({
             response_type: 'ephemeral',
-            replace_original: true,
-            text: `⚠️ Decision already recorded`,
-            blocks: [
-              {
-                type: 'section',
-                text: {
-                  type: 'mrkdwn',
-                  text: `⚠️ This overtime request has already been ${status.toLowerCase()} by ${decidedBy} at ${decisionTime} (PKT).`,
-                },
-              },
-            ] as any,
+            delete_original: true,
           })
         }
 
@@ -1112,21 +1102,10 @@ export async function POST(req: NextRequest) {
           console.warn(`Could not send DM to requester ${requesterId}:`, dmError)
         }
 
-        // 3. Replace ephemeral message to remove buttons
-        const emoji = decision === 'Approved' ? '✅' : '❌'
+        // 3. Delete ephemeral message to remove it completely after decision
         return NextResponse.json({
           response_type: 'ephemeral',
-          replace_original: true,
-          text: `${emoji} Decision recorded: ${status}`,
-          blocks: [
-            {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: `${emoji} *Decision recorded: ${status}*\n\nYour decision has been recorded. The requester has been notified.`,
-              },
-            },
-          ] as any,
+          delete_original: true,
         })
       }
 
