@@ -347,7 +347,7 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      // Build channel message blocks (NO buttons - visible to everyone)
+      // Build channel message blocks (WITH buttons - visible to everyone in channel)
       const channelMessageBlocks = [
           {
             type: 'header',
@@ -393,13 +393,13 @@ export async function POST(req: NextRequest) {
             elements: [
               {
                 type: 'mrkdwn',
-              text: `*Status:* Pending approval (waiting for <@${assignedByUserId}>)`,
+                text: `*Status:* Pending approval (waiting for <@${assignedByUserId}>)`,
               },
             ],
           },
       ]
 
-      // Post ONE message to overtime channel (NO buttons)
+      // Post message to overtime channel (WITH buttons - everyone can see and interact)
       const message = await slackClient.chat.postMessage({
         channel: overtimeChannelId,
         text: `⏱️ Overtime Request from <@${requesterId}>`, // fallback
@@ -410,47 +410,9 @@ export async function POST(req: NextRequest) {
       const channelId = message.channel as string
       const nowIso = new Date().toISOString()
 
-      // Build ephemeral message blocks (WITH buttons - only visible to assignedByUserId)
-      const ephemeralMessageBlocks = [
-        {
-          type: 'header',
-          text: {
-            type: 'plain_text',
-            text: '⏱️ Overtime Approval Required',
-          },
-        },
-        {
-          type: 'section',
-          fields: [
-            {
-              type: 'mrkdwn',
-              text: `*Employee:*\n<@${requesterId}>`,
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Project:*\n${projectName}`,
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Assigned by:*\n<@${assignedByUserId}>`,
-            },
-            {
-              type: 'mrkdwn',
-              text: `*Duration:*\n${durationText}`,
-            },
-          ],
-        },
-        ...(reason
-          ? ([
-              {
-                type: 'section',
-                text: {
-                  type: 'mrkdwn',
-                  text: `*Task / Reason:*\n${reason}`,
-                },
-              },
-            ] as any[])
-          : []),
+      // Update message to add buttons (buttons need messageTs in value, so update after posting)
+      const channelMessageBlocksWithButtons = [
+        ...channelMessageBlocks,
         {
           type: 'actions',
           block_id: 'ot_decision',
@@ -485,12 +447,12 @@ export async function POST(req: NextRequest) {
         },
       ]
 
-      // Post ephemeral message to assignedByUserId (with buttons)
-      await slackClient.chat.postEphemeral({
-        channel: overtimeChannelId,
-        user: assignedByUserId,
-        text: 'Overtime approval required',
-        blocks: ephemeralMessageBlocks as any,
+      // Update the message to include buttons
+      await slackClient.chat.update({
+        channel: channelId,
+        ts: ts,
+        text: `⏱️ Overtime Request from <@${requesterId}>`,
+        blocks: channelMessageBlocksWithButtons as any,
       })
 
       // Save to Google Sheets
@@ -904,13 +866,7 @@ export async function POST(req: NextRequest) {
           })
         }
 
-        // Authorization: Only the "Assigned by" person can approve/reject
-        if (approverId !== overtimeRequest.assignedByUserId) {
-          return NextResponse.json({
-            response_type: 'ephemeral',
-            text: `❌ Only <@${overtimeRequest.assignedByUserId}> can approve/reject this overtime request.`,
-          })
-        }
+        // Anyone in the channel can approve/reject (no authorization check)
 
         // Determine decision
         const decision: 'Approved' | 'Rejected' =
@@ -958,48 +914,107 @@ export async function POST(req: NextRequest) {
           minute: '2-digit',
         })
 
-        // If already decided, delete ephemeral message and return
+        // If already decided, acknowledge and return (buttons will be removed by update below)
         if (alreadyDecided) {
+          // Still update the message to ensure buttons are removed
+          const updatedChannelBlocks = [
+            {
+              type: 'header',
+              text: {
+                type: 'plain_text',
+                text: '⏱️ Overtime Request',
+              },
+            },
+            {
+              type: 'section',
+              fields: [
+                {
+                  type: 'mrkdwn',
+                  text: `*Employee:*\n<@${requesterId}>`,
+                },
+                {
+                  type: 'mrkdwn',
+                  text: `*Project:*\n${projectName}`,
+                },
+                {
+                  type: 'mrkdwn',
+                  text: `*Assigned by:*\n<@${assignedByUserId}>`,
+                },
+                {
+                  type: 'mrkdwn',
+                  text: `*Duration:*\n${durationText}`,
+                },
+              ],
+            },
+            ...(reason
+              ? ([
+                  {
+                    type: 'section',
+                    text: {
+                      type: 'mrkdwn',
+                      text: `*Task / Reason:*\n${reason}`,
+                    },
+                  },
+                ] as any[])
+              : []),
+            {
+              type: 'context',
+              elements: [
+                {
+                  type: 'mrkdwn',
+                  text: `*Status:* ${status} by ${decidedBy} at ${decisionTime} (PKT)`,
+                },
+              ],
+            },
+          ]
+
+          await slackClient.chat.update({
+            channel: channelId,
+            ts: messageTs,
+            text: `⏱️ Overtime Request ${status.toLowerCase()} by ${decidedBy}`,
+            blocks: updatedChannelBlocks as any,
+          })
+
           return NextResponse.json({
             response_type: 'ephemeral',
-            delete_original: true,
+            text: `⚠️ This overtime request has already been ${status.toLowerCase()} by ${decidedBy} at ${decisionTime} (PKT).`,
           })
         }
 
         // New decision - update channel message and DM requester
-        // 1. Update the overtime channel message (show status - no buttons to remove)
+        // 1. Update the overtime channel message (show status - remove buttons)
         const updatedChannelBlocks = [
-              {
-                type: 'header',
-                text: {
-                  type: 'plain_text',
+          {
+            type: 'header',
+            text: {
+              type: 'plain_text',
               text: '⏱️ Overtime Request',
-                },
+            },
+          },
+          {
+            type: 'section',
+            fields: [
+              {
+                type: 'mrkdwn',
+                text: `*Employee:*\n<@${requesterId}>`,
               },
               {
-                type: 'section',
-                fields: [
-                  {
-                    type: 'mrkdwn',
-                    text: `*Employee:*\n<@${requesterId}>`,
-                  },
-                  {
-                    type: 'mrkdwn',
-                    text: `*Project:*\n${projectName}`,
-                  },
+                type: 'mrkdwn',
+                text: `*Project:*\n${projectName}`,
+              },
               {
                 type: 'mrkdwn',
                 text: `*Assigned by:*\n<@${assignedByUserId}>`,
               },
-                  {
-                    type: 'mrkdwn',
-                    text: `*Duration:*\n${durationText}`,
-                  },
+              {
+                type: 'mrkdwn',
+                text: `*Duration:*\n${durationText}`,
+              },
             ],
           },
           ...(reason
             ? ([
-                  {
+                {
                   type: 'section',
                   text: {
                     type: 'mrkdwn',
@@ -1014,12 +1029,12 @@ export async function POST(req: NextRequest) {
               {
                 type: 'mrkdwn',
                 text: `*Status:* ${status} by <@${approverId}> at ${decisionTime} (PKT)`,
-                  },
-                ],
               },
+            ],
+          },
         ]
 
-        // Update channel message (status only, no buttons to remove)
+        // Update channel message (remove buttons by not including actions block)
         await slackClient.chat.update({
           channel: channelId,
           ts: messageTs,
@@ -1102,10 +1117,10 @@ export async function POST(req: NextRequest) {
           console.warn(`Could not send DM to requester ${requesterId}:`, dmError)
         }
 
-        // 3. Delete ephemeral message to remove it completely after decision
+        // 3. Acknowledge the button click (buttons already removed from channel message)
         return NextResponse.json({
           response_type: 'ephemeral',
-          delete_original: true,
+          text: `${decision === 'Approved' ? '✅' : '❌'} Decision recorded: ${status}. The requester has been notified.`,
         })
       }
 
