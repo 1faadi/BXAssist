@@ -217,7 +217,7 @@ export async function POST(req: NextRequest) {
           fields: [
             {
               type: 'mrkdwn',
-              text: `*Reporter:*\n<@${reporterId}> (${reporterName})`,
+              text: `*Reporter:*\n<@${reporterId}>`,
             },
             {
               type: 'mrkdwn',
@@ -274,7 +274,7 @@ export async function POST(req: NextRequest) {
 
       await slackClient.chat.postMessage({
         channel: dailyReportChannelId,
-        text: `Daily report from ${reporterName}`, // fallback
+        text: `Daily report from <@${reporterId}>`, // fallback
         blocks,
       })
 
