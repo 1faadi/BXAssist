@@ -130,7 +130,7 @@ This handles:
 - Modal submissions (leave request form)
 - Button clicks (approval buttons)
 
-### Required Bot Scopes
+### Required Bot Scopesss
 
 In **OAuth & Permissions**, ensure your bot has:
 - `commands` - For slash commands
