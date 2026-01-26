@@ -1,15 +1,13 @@
 /**
  * Daily Scheduler Cron Endpoint
  * 
- * Runs once per day (early morning UTC) to schedule Slack DMs for attendance reminders.
+ * Runs once per day (early morning UTC) to schedule Slack DMs for standup reminders.
  * 
  * Flow:
  * 1. Reads reminder time from Settings tab (default: "09:10")
- * 2. Gets all members of attendance channel
+ * 2. Gets all members of standup channel
  * 3. For each member, schedules a DM at the configured PK time
  * 4. Saves scheduled message IDs to AttendanceReminderQueue
- * 
- * When users check in, their scheduled reminder is cancelled.
  * 
  * Secured by CRON_SECRET query parameter.
  */
@@ -22,7 +20,6 @@ import {
   findReminderForUser,
 } from '@/lib/googleSheets'
 import { getPkDateStr, pkTimeToUtcEpochSeconds } from '@/lib/pkTime'
-import { generateSignedAttendanceUrl } from '@/lib/attendanceSecurity'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
@@ -38,11 +35,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const attendanceChannelId = process.env.SLACK_ATTENDANCE_CHANNEL_ID
-    if (!attendanceChannelId) {
-      console.error('SLACK_ATTENDANCE_CHANNEL_ID is not set')
+    const standupChannelId = process.env.SLACK_STANDUP_CHANNEL_ID
+    if (!standupChannelId) {
+      console.error('SLACK_STANDUP_CHANNEL_ID is not set')
       return NextResponse.json(
-        { error: 'Attendance channel not configured' },
+        { error: 'Standup channel not configured' },
         { status: 500 }
       )
     }
@@ -56,13 +53,13 @@ export async function GET(req: NextRequest) {
     const postAt = pkTimeToUtcEpochSeconds(datePk, reminderTime)
     console.log(`Scheduling reminders for ${datePk} at ${reminderTime} PKT (UTC epoch: ${postAt})`)
 
-    // 3. Get all members of attendance channel (with pagination)
+    // 3. Get all members of standup channel (with pagination)
     const channelMembers: string[] = []
     let cursor: string | undefined
 
     do {
       const response = await slackClient.conversations.members({
-        channel: attendanceChannelId,
+        channel: standupChannelId,
         cursor,
       })
 
@@ -73,7 +70,7 @@ export async function GET(req: NextRequest) {
       cursor = response.response_metadata?.next_cursor
     } while (cursor)
 
-    console.log(`Found ${channelMembers.length} members in attendance channel`)
+    console.log(`Found ${channelMembers.length} members in standup channel`)
 
     // 4. For each member, schedule a DM
     let successCount = 0
@@ -114,12 +111,6 @@ export async function GET(req: NextRequest) {
         }
 
         const imChannelId = dmResponse.channel.id
-
-        // Generate signed check-in URL
-        const checkInUrl = generateSignedAttendanceUrl({
-          type: 'checkin',
-          slackUserId: memberId,
-        })
 
         // Schedule message
         const scheduleResponse = await slackClient.chat.scheduleMessage({

@@ -1236,6 +1236,7 @@ export async function appendStandupRow(args: {
   slackUserId: string
   employeeName: string
   projectName: string
+  assignedByUserId: string
   todaysTask: string
   slackMessageTs: string
   slackChannelId: string
@@ -1246,6 +1247,7 @@ export async function appendStandupRow(args: {
     slackUserId,
     employeeName,
     projectName,
+    assignedByUserId,
     todaysTask,
     slackMessageTs,
     slackChannelId,
@@ -1263,9 +1265,10 @@ export async function appendStandupRow(args: {
           slackUserId, // C: SlackUserId
           employeeName, // D: EmployeeName
           projectName, // E: ProjectName
-          todaysTask, // F: TodaysTask
-          slackMessageTs, // G: SlackMessageTs
-          slackChannelId, // H: SlackChannelId
+          assignedByUserId, // F: AssignedByUserId
+          todaysTask, // G: TodaysTask
+          slackMessageTs, // H: SlackMessageTs
+          slackChannelId, // I: SlackChannelId
         ],
       ],
     },

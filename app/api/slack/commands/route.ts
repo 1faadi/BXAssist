@@ -573,6 +573,22 @@ export async function POST(req: NextRequest) {
             },
             {
               type: 'input',
+              block_id: 'su_assigned_by',
+              label: {
+                type: 'plain_text',
+                text: 'Assigned by',
+              },
+              element: {
+                type: 'users_select',
+                action_id: 'value',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select who assigned this task',
+                },
+              },
+            },
+            {
+              type: 'input',
               block_id: 'su_task',
               label: {
                 type: 'plain_text',

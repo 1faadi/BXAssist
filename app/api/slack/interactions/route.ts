@@ -704,12 +704,16 @@ export async function POST(req: NextRequest) {
 
       // Extract form values
       const project: string = state.su_project.value.value
+      const assignedByUserId: string = state.su_assigned_by.value.selected_user
       const taskRaw: string = state.su_task.value.value
 
       // Validate
       const errors: Record<string, string> = {}
       if (!project || !project.trim()) {
         errors.su_project = 'Project name is required'
+      }
+      if (!assignedByUserId) {
+        errors.su_assigned_by = 'Assigned by is required'
       }
       if (!taskRaw || !taskRaw.trim()) {
         errors.su_task = "Today's task is required"
@@ -779,6 +783,10 @@ export async function POST(req: NextRequest) {
                 type: 'mrkdwn',
                 text: `*Project:*\n${project}`,
               },
+              {
+                type: 'mrkdwn',
+                text: `*Assigned by:*\n<@${assignedByUserId}>`,
+              },
             ],
           },
           {
@@ -803,6 +811,7 @@ export async function POST(req: NextRequest) {
           slackUserId: userId,
           employeeName,
           projectName: project,
+          assignedByUserId,
           todaysTask: taskRaw, // Store raw task text, not formatted
           slackMessageTs: ts,
           slackChannelId: channelId,
