@@ -52,6 +52,21 @@ export async function GET(req: NextRequest) {
     // 2. Compute today's PK date and UTC epoch for scheduled time
     const datePk = getPkDateStr()
     const postAt = pkTimeToUtcEpochSeconds(datePk, reminderTime)
+    const nowEpoch = Math.floor(Date.now() / 1000)
+
+    // Check if the scheduled time has already passed
+    if (postAt <= nowEpoch) {
+      console.log(`Reminder time ${reminderTime} PKT has already passed for today (${datePk}). Skipping.`)
+      return NextResponse.json({
+        success: false,
+        error: 'Reminder time has passed for today',
+        date: datePk,
+        reminderTime,
+        postAt,
+        currentTime: nowEpoch,
+      })
+    }
+
     console.log(`Scheduling reminders for ${datePk} at ${reminderTime} PKT (UTC epoch: ${postAt})`)
 
     // 3. Get all members of standup channel (with pagination)
@@ -80,13 +95,13 @@ export async function GET(req: NextRequest) {
 
     for (const memberId of channelMembers) {
       try {
-        // Optional: Skip bots (can be expensive to check all, so we'll schedule for all)
-        // If you want to skip bots, uncomment:
-        // const userInfo = await slackClient.users.info({ user: memberId })
-        // if (userInfo.user?.is_bot || userInfo.user?.deleted) {
-        //   skippedCount++
-        //   continue
-        // }
+        // Skip bots and deleted users
+        const userInfo = await slackClient.users.info({ user: memberId })
+        if (userInfo.user?.is_bot || userInfo.user?.deleted) {
+          console.log(`Skipping bot/deleted user: ${memberId}`)
+          skippedCount++
+          continue
+        }
 
         // Check if reminder already scheduled for today
         const existing = await findReminderForUser({
