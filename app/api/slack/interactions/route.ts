@@ -30,6 +30,7 @@ import {
   setShortLeaveDecision,
 } from '@/lib/googleSheets'
 import { toBullets } from '@/lib/textFormat'
+import { nowPk } from '@/lib/timePk'
 
 const LEAVE_CHANNEL_ID = process.env.SLACK_LEAVE_CHANNEL_ID
 
@@ -170,6 +171,8 @@ export async function POST(req: NextRequest) {
       const state = payload.view.state.values
 
       // Extract form values
+      const selectedDate: string =
+        state.dr_date?.value?.selected_date || nowPk().datePk
       const projectName = state.dr_project_name.value.value
       const hours = state.dr_hours.value.value
       const reportingUsers: string[] = state.dr_reporting_to.value.selected_users
@@ -189,9 +192,9 @@ export async function POST(req: NextRequest) {
         payload.user.username ||
         reporterId
 
-      // Format current date
-      const now = new Date()
-      const dateStr = now.toLocaleDateString('en-GB', {
+      // Format selected date (YYYY-MM-DD) for display
+      const dateObj = new Date(selectedDate + 'T12:00:00')
+      const dateStr = dateObj.toLocaleDateString('en-GB', {
         day: '2-digit',
         month: 'short',
         year: 'numeric',

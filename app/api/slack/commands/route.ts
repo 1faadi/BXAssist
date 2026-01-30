@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { slackClient } from '@/lib/slackClient'
 import { generateSignedAttendanceUrl } from '@/lib/attendanceSecurity'
+import { nowPk } from '@/lib/timePk'
 
 // Force dynamic rendering for this route
 export const dynamic = 'force-dynamic'
@@ -438,6 +439,8 @@ export async function POST(req: NextRequest) {
 
     // Handle /daily-report command
     if (command === '/daily-report') {
+      const { datePk } = nowPk()
+
       await slackClient.views.open({
         trigger_id: triggerId,
         view: {
@@ -456,6 +459,19 @@ export async function POST(req: NextRequest) {
             text: 'Cancel',
           },
           blocks: [
+            {
+              type: 'input',
+              block_id: 'dr_date',
+              label: {
+                type: 'plain_text',
+                text: 'Date',
+              },
+              element: {
+                type: 'datepicker',
+                action_id: 'value',
+                initial_date: datePk,
+              },
+            },
             {
               type: 'input',
               block_id: 'dr_project_name',
