@@ -43,3 +43,24 @@ export function toBullets(input: string): string {
     .join('\n')
 }
 
+/**
+ * Strip bullet prefixes from multiline text (reverse of toBullets)
+ *
+ * @param input - Bullet-formatted text e.g. "• Task 1\n• Task 2"
+ * @returns Plain text e.g. "Task 1\nTask 2"
+ */
+export function fromBullets(input: string): string {
+  if (!input || !input.trim()) return ''
+  return input
+    .split('\n')
+    .map((line) => {
+      const t = line.trim()
+      if (t.startsWith('• ')) return t.slice(2)
+      if (t.startsWith('•')) return t.slice(1).trim()
+      if (t.startsWith('- ')) return t.slice(2)
+      if (t.startsWith('-')) return t.slice(1).trim()
+      return t
+    })
+    .join('\n')
+}
+

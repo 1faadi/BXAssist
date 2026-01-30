@@ -29,7 +29,7 @@ import {
   appendShortLeaveRequestRow,
   setShortLeaveDecision,
 } from '@/lib/googleSheets'
-import { toBullets } from '@/lib/textFormat'
+import { toBullets, fromBullets } from '@/lib/textFormat'
 import { nowPk } from '@/lib/timePk'
 
 const LEAVE_CHANNEL_ID = process.env.SLACK_LEAVE_CHANNEL_ID
@@ -260,7 +260,7 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      // Post to daily report channel
+      // Post to daily report channel (without Edit button first)
       const dailyReportChannelId = process.env.SLACK_DAILY_REPORT_CHANNEL_ID
       if (!dailyReportChannelId) {
         console.error('SLACK_DAILY_REPORT_CHANNEL_ID is not set')
@@ -275,13 +275,137 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      await slackClient.chat.postMessage({
+      const postResult = await slackClient.chat.postMessage({
         channel: dailyReportChannelId,
         text: `Daily report from <@${reporterId}>`, // fallback
         blocks,
       })
 
+      const messageTs = postResult.ts as string
+      const channelId = postResult.channel as string
+
+      // Update message to add Edit button with channel/message ref
+      blocks.push({
+        type: 'actions',
+        block_id: 'dr_edit_block',
+        elements: [
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: 'Edit',
+            },
+            action_id: 'dr_edit',
+            value: JSON.stringify({ channelId, messageTs }),
+          },
+        ],
+      })
+
+      await slackClient.chat.update({
+        channel: channelId,
+        ts: messageTs,
+        text: `Daily report from <@${reporterId}>`,
+        blocks,
+      })
+
       // Close modal
+      return NextResponse.json({ response_action: 'clear' })
+    }
+
+    // 2a) Handle daily report EDIT modal submission
+    if (
+      payload.type === 'view_submission' &&
+      payload.view?.callback_id === 'daily_report_edit_modal'
+    ) {
+      const state = payload.view.state.values
+      const metadata = payload.view.private_metadata
+      let channelId: string
+      let messageTs: string
+      try {
+        const parsed = JSON.parse(metadata || '{}')
+        channelId = parsed.channelId
+        messageTs = parsed.messageTs
+      } catch {
+        return NextResponse.json({
+          response_action: 'errors',
+          errors: { dr_project_name: 'Invalid edit context. Please try again.' },
+        })
+      }
+      if (!channelId || !messageTs) {
+        return NextResponse.json({
+          response_action: 'errors',
+          errors: { dr_project_name: 'Invalid edit context. Please try again.' },
+        })
+      }
+
+      const selectedDate = state.dr_date?.value?.selected_date || nowPk().datePk
+      const projectName = state.dr_project_name.value.value
+      const hours = state.dr_hours.value.value
+      const reportingUsers: string[] = state.dr_reporting_to.value.selected_users || []
+      const progressText = state.dr_progress.value.value
+      const tomorrowPlan = state.dr_tomorrow?.value?.value ?? ''
+
+      const formattedProgress = toBullets(progressText)
+      const formattedTomorrowPlan = tomorrowPlan.trim() ? toBullets(tomorrowPlan) : ''
+
+      const reporterId = payload.user.id
+      const dateObj = new Date(selectedDate + 'T12:00:00')
+      const dateStr = dateObj.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      })
+      const reportingMentions =
+        reportingUsers.length > 0
+          ? reportingUsers.map((id) => `<@${id}>`).join(' ')
+          : 'N/A'
+
+      const blocks: any[] = [
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: 'Daily Progress Report' },
+        },
+        {
+          type: 'section',
+          fields: [
+            { type: 'mrkdwn', text: `*Reporter:*\n<@${reporterId}>` },
+            { type: 'mrkdwn', text: `*Date:*\n${dateStr}` },
+            { type: 'mrkdwn', text: `*Project:*\n${projectName}` },
+            { type: 'mrkdwn', text: `*Hours:*\n${hours}` },
+            { type: 'mrkdwn', text: `*Reporting To:*\n${reportingMentions}` },
+          ],
+        },
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: `*Tasks / Progress:*\n${formattedProgress}` },
+        },
+      ]
+      if (formattedTomorrowPlan) {
+        blocks.push({
+          type: 'section',
+          text: { type: 'mrkdwn', text: `*Tomorrow's Plan:*\n${formattedTomorrowPlan}` },
+        })
+      }
+      blocks.push({
+        type: 'actions',
+        block_id: 'dr_edit_block',
+        elements: [
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: 'Edit' },
+            action_id: 'dr_edit',
+            value: JSON.stringify({ channelId, messageTs }),
+          },
+        ],
+      })
+
+      await slackClient.chat.update({
+        channel: channelId,
+        ts: messageTs,
+        text: `Daily report from <@${reporterId}>`,
+        blocks,
+      })
+
       return NextResponse.json({ response_action: 'clear' })
     }
 
@@ -828,10 +952,163 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ response_action: 'clear' })
     }
 
-    // 3) Handle button clicks (Approve/Reject)
+    // 3) Handle button clicks (Approve/Reject) and Edit
     if (payload.type === 'block_actions') {
       const action = payload.actions?.[0]
       if (!action) return new NextResponse('', { status: 200 })
+
+      // Handle daily report Edit button
+      if (action.action_id === 'dr_edit') {
+        const triggerId = payload.trigger_id
+        if (!triggerId) return new NextResponse('', { status: 200 })
+
+        let channelId: string
+        let messageTs: string
+        try {
+          const valueData = JSON.parse(action.value || '{}')
+          channelId = valueData.channelId
+          messageTs = valueData.messageTs
+        } catch {
+          return new NextResponse('', { status: 200 })
+        }
+        if (!channelId || !messageTs) return new NextResponse('', { status: 200 })
+
+        const blocks = payload.message?.blocks || []
+        const sectionBlock = blocks.find((b: any) => b.type === 'section' && b.fields)
+        if (!sectionBlock) return new NextResponse('', { status: 200 })
+
+        const fields = sectionBlock.fields
+        const getField = (i: number) => ((fields[i]?.text || '').split('\n')[1] || '').trim()
+        const reporterMatch = (getField(0) || '').match(/<@([A-Z0-9]+)>/)
+        const reporterId = reporterMatch ? reporterMatch[1] : ''
+
+        // Only the reporter can edit their own report
+        if (payload.user.id !== reporterId) {
+          await slackClient.chat.postEphemeral({
+            channel: channelId,
+            user: payload.user.id,
+            text: 'Only the report author can edit this report.',
+          })
+          return new NextResponse('', { status: 200 })
+        }
+
+        const dateDisplay = getField(1) // "26 Jan 2026"
+        const MONTHS: Record<string, string> = {
+          Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
+          Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
+        }
+        const dateParts = dateDisplay.trim().split(/\s+/)
+        const initialDate =
+          dateParts.length === 3 && MONTHS[dateParts[1]]
+            ? `${dateParts[2]}-${MONTHS[dateParts[1]]}-${dateParts[0].padStart(2, '0')}`
+            : nowPk().datePk
+
+        const project = getField(2)
+        const hours = getField(3)
+        const reportingRaw = getField(4)
+        const initialUsers: string[] =
+          reportingRaw === 'N/A'
+            ? []
+            : (reportingRaw.match(/<@([A-Z0-9]+)>/g) || []).map((m: string) =>
+                m.replace(/^<@|>$/g, '')
+              )
+
+        const progressBlock = blocks.find(
+          (b: any) => b.type === 'section' && b.text?.text?.includes('*Tasks / Progress:*')
+        )
+        const progress = fromBullets(
+          (progressBlock?.text?.text || '').replace(/^\*Tasks \/ Progress:\*\n?/, '')
+        )
+
+        const tomorrowBlock = blocks.find(
+          (b: any) => b.type === 'section' && b.text?.text?.includes("*Tomorrow's Plan:*")
+        )
+        const tomorrow = fromBullets(
+          (tomorrowBlock?.text?.text || '').replace(/^\*Tomorrow's Plan:\*\n?/, '')
+        )
+
+        await slackClient.views.open({
+          trigger_id: triggerId,
+          view: {
+            type: 'modal',
+            callback_id: 'daily_report_edit_modal',
+            title: { type: 'plain_text', text: 'Edit Daily Report' },
+            submit: { type: 'plain_text', text: 'Save' },
+            close: { type: 'plain_text', text: 'Cancel' },
+            private_metadata: JSON.stringify({ channelId, messageTs }),
+            blocks: [
+              {
+                type: 'input',
+                block_id: 'dr_date',
+                label: { type: 'plain_text', text: 'Date' },
+                element: {
+                  type: 'datepicker',
+                  action_id: 'value',
+                  initial_date: initialDate,
+                },
+              },
+              {
+                type: 'input',
+                block_id: 'dr_project_name',
+                label: { type: 'plain_text', text: 'Project Name' },
+                element: {
+                  type: 'plain_text_input',
+                  action_id: 'value',
+                  initial_value: project,
+                },
+              },
+              {
+                type: 'input',
+                block_id: 'dr_hours',
+                label: { type: 'plain_text', text: 'Hours' },
+                element: {
+                  type: 'plain_text_input',
+                  action_id: 'value',
+                  initial_value: hours,
+                },
+              },
+              {
+                type: 'input',
+                block_id: 'dr_reporting_to',
+                label: { type: 'plain_text', text: 'Reporting To' },
+                element: {
+                  type: 'multi_users_select',
+                  action_id: 'value',
+                  placeholder: { type: 'plain_text', text: 'Select reporting managers' },
+                  ...(initialUsers.length > 0 && { initial_users: initialUsers }),
+                },
+              },
+              {
+                type: 'input',
+                block_id: 'dr_progress',
+                label: { type: 'plain_text', text: 'Progress / Tasks done today' },
+                element: {
+                  type: 'plain_text_input',
+                  action_id: 'value',
+                  multiline: true,
+                  initial_value: progress,
+                  placeholder: { type: 'plain_text', text: '• Task 1\n• Task 2\n• Task 3' },
+                },
+              },
+              {
+                type: 'input',
+                block_id: 'dr_tomorrow',
+                label: { type: 'plain_text', text: "Tomorrow's plan (optional)" },
+                optional: true,
+                element: {
+                  type: 'plain_text_input',
+                  action_id: 'value',
+                  multiline: true,
+                  initial_value: tomorrow,
+                  placeholder: { type: 'plain_text', text: '• Plan item 1\n• Plan item 2' },
+                },
+              },
+            ],
+          },
+        })
+
+        return new NextResponse('', { status: 200 })
+      }
 
       // Handle overtime approve/reject
       if (action.action_id === 'ot_approve' || action.action_id === 'ot_reject') {
