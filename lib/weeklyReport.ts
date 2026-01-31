@@ -232,7 +232,16 @@ export async function fetchAndCompileWeeklyReport(
     const friday = userReports[userReports.length - 1]?.dateStr ?? ''
     const dateRangeStr = `${monday} – ${friday}`
 
-    const compiledText = compileToText(userReports, dateRangeStr, `<@${userId}>`)
+    let reporterName = `<@${userId}>`
+    try {
+      const userInfo = await slackClient.users.info({ user: userId })
+      const profile = userInfo.user?.profile as { real_name?: string; display_name?: string } | undefined
+      reporterName = profile?.real_name || profile?.display_name || reporterName
+    } catch {
+      // fallback to mention if user lookup fails
+    }
+
+    const compiledText = compileToText(userReports, dateRangeStr, reporterName)
 
     return {
       success: true,
