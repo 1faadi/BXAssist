@@ -18,6 +18,7 @@ declare namespace NodeJS {
     SLACK_SIGNING_SECRET: string
     SLACK_LEAVE_CHANNEL_ID: string // Channel ID where leave requests are posted
     SLACK_DAILY_REPORT_CHANNEL_ID?: string // Channel ID where daily reports are posted
+    SLACK_WEEKLY_REPORT_CHANNEL_ID?: string // Channel ID where weekly reports are posted
     SLACK_ATTENDANCE_CHANNEL_ID?: string // Channel ID where attendance messages are posted
     SLACK_OVERTIME_CHANNEL_ID?: string // Channel ID where overtime requests are posted
     SLACK_SHORT_LEAVE_CHANNEL_ID?: string // Channel ID where short leave requests are posted

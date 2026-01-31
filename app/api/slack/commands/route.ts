@@ -4,6 +4,7 @@
  * This endpoint handles Slack slash commands:
  * - /leave-req - Opens leave request modal
  * - /daily-report - Opens daily progress report modal
+ * - /weekly-report - Fetches daily reports from the week, opens modal to edit and send to Weekly Progress channel
  * - /check-in - Returns ephemeral message with button to open check-in page (office network only)
  * - /checkout - Returns ephemeral message with button to open checkout page (office network only)
  * 
@@ -16,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { slackClient } from '@/lib/slackClient'
 import { generateSignedAttendanceUrl } from '@/lib/attendanceSecurity'
 import { nowPk } from '@/lib/timePk'
+import { fetchAndCompileWeeklyReport } from '@/lib/weeklyReport'
 
 // Force dynamic rendering for this route
 export const dynamic = 'force-dynamic'
@@ -555,6 +557,66 @@ export async function POST(req: NextRequest) {
       return new NextResponse('', { status: 200 })
     }
 
+    // Handle /weekly-report command
+    if (command === '/weekly-report') {
+      if (!userId) {
+        return NextResponse.json({ error: 'Missing user_id' }, { status: 400 })
+      }
+
+      const dailyChannelId = process.env.SLACK_DAILY_REPORT_CHANNEL_ID
+      const weeklyChannelId = process.env.SLACK_WEEKLY_REPORT_CHANNEL_ID
+      if (!dailyChannelId || !weeklyChannelId) {
+        return NextResponse.json({
+          response_type: 'ephemeral',
+          text: 'Weekly report is not configured. Please contact admin.',
+        })
+      }
+
+      const result = await fetchAndCompileWeeklyReport(userId, dailyChannelId)
+
+      if (!result.success) {
+        return NextResponse.json({
+          response_type: 'ephemeral',
+          text: result.error || 'Failed to fetch reports.',
+        })
+      }
+
+      if (result.reportCount === 0) {
+        return NextResponse.json({
+          response_type: 'ephemeral',
+          text: 'No daily reports found this week. Use `/daily-report` first.',
+        })
+      }
+
+      await slackClient.views.open({
+        trigger_id: triggerId,
+        view: {
+          type: 'modal',
+          callback_id: 'weekly_report_modal',
+          title: { type: 'plain_text', text: 'Weekly Report' },
+          submit: { type: 'plain_text', text: 'Send' },
+          close: { type: 'plain_text', text: 'Cancel' },
+          private_metadata: JSON.stringify({ weeklyChannelId }),
+          blocks: [
+            {
+              type: 'input',
+              block_id: 'wr_message',
+              label: { type: 'plain_text', text: 'Your weekly report (edit as needed)' },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'value',
+                multiline: true,
+                initial_value: result.compiledText,
+                max_length: 3000,
+              },
+            },
+          ],
+        },
+      })
+
+      return new NextResponse('', { status: 200 })
+    }
+
     // Handle /standup command
     if (command === '/standup') {
       await slackClient.views.open({
@@ -631,7 +693,7 @@ export async function POST(req: NextRequest) {
     // Unknown command
     return NextResponse.json({
       response_type: 'ephemeral',
-      text: `Unknown command: ${command}. Available commands: /check-in, /checkout, /leave-req, /daily-report, /overtime-req, /short-leave-req, /standup`,
+      text: `Unknown command: ${command}. Available commands: /check-in, /checkout, /leave-req, /daily-report, /weekly-report, /overtime-req, /short-leave-req, /standup`,
     })
   } catch (err) {
     console.error('Error in /api/slack/commands', err)

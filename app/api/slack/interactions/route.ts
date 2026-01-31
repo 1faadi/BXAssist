@@ -312,6 +312,50 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ response_action: 'clear' })
     }
 
+    // 2b) Handle weekly report modal submission
+    if (
+      payload.type === 'view_submission' &&
+      payload.view?.callback_id === 'weekly_report_modal'
+    ) {
+      const state = payload.view.state.values
+      const messageText = state.wr_message?.value?.value ?? ''
+      let weeklyChannelId: string
+      try {
+        const metadata = JSON.parse(payload.view.private_metadata || '{}')
+        weeklyChannelId = metadata.weeklyChannelId
+      } catch {
+        return NextResponse.json({
+          response_action: 'errors',
+          errors: { wr_message: 'Invalid context. Please try again.' },
+        })
+      }
+      const userId = payload.user.id
+
+      if (!weeklyChannelId || !messageText.trim()) {
+        return NextResponse.json({
+          response_action: 'errors',
+          errors: { wr_message: 'Message cannot be empty.' },
+        })
+      }
+
+      await slackClient.chat.postMessage({
+        channel: weeklyChannelId,
+        text: messageText,
+        blocks: [
+          {
+            type: 'context',
+            elements: [{ type: 'mrkdwn', text: `Weekly report from <@${userId}>` }],
+          },
+          {
+            type: 'section',
+            text: { type: 'plain_text', text: messageText, emoji: true },
+          },
+        ],
+      })
+
+      return NextResponse.json({ response_action: 'clear' })
+    }
+
     // 2a) Handle daily report EDIT modal submission
     if (
       payload.type === 'view_submission' &&
