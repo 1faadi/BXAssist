@@ -54,6 +54,25 @@ export default function DashboardHome() {
             </p>
           </div>
         </Link>
+
+        <Link href="/dashboard/records">
+          <div
+            style={{
+              padding: '1.25rem 1.5rem',
+              borderRadius: 12,
+              border: '1px solid #ddd',
+              cursor: 'pointer',
+              background: '#fafafa',
+            }}
+          >
+            <h2 style={{ margin: 0, marginBottom: 8, fontSize: '1.1rem' }}>
+              HR Records
+            </h2>
+            <p style={{ margin: 0, fontSize: 14, color: '#666' }}>
+              View and edit leave, overtime, short leave; monthly export.
+            </p>
+          </div>
+        </Link>
       </div>
     </main>
   )

@@ -384,6 +384,34 @@ export async function getValues(range: string): Promise<any[][]> {
 }
 
 /**
+ * Update a single row in a sheet by 1-based row index.
+ * Used by HR dashboard to edit records.
+ * @param sheetName - Tab name (e.g. LeaveRequests, OvertimeRequests, ShortLeaveRequests)
+ * @param rowIndex - 1-based row (1 = header, 2 = first data row)
+ * @param values - Array of cell values for the row (length must match sheet column count)
+ */
+export async function updateRow(
+  sheetName: string,
+  rowIndex: number,
+  values: string[]
+): Promise<void> {
+  const colCount = values.length
+  if (colCount < 1 || rowIndex < 2) {
+    throw new Error('Invalid row or values length')
+  }
+  const colEnd = String.fromCharCode(64 + colCount) // A=1 -> A, 11 -> K, 13 -> M
+  const range = `${sheetName}!A${rowIndex}:${colEnd}${rowIndex}`
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [values],
+    },
+  })
+}
+
+/**
  * Settings Tab Helpers
  * 
  * Settings tab structure:

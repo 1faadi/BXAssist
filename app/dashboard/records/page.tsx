@@ -1,14 +1,8 @@
-import AttendanceClient from './AttendanceClient'
+import RecordsClient from './RecordsClient'
 
 export const dynamic = 'force-dynamic'
 
-export default function AttendancePage() {
-  const today = new Date()
-  const yyyy = today.getFullYear()
-  const mm = String(today.getMonth() + 1).padStart(2, '0')
-  const dd = String(today.getDate()).padStart(2, '0')
-  const defaultDate = `${yyyy}-${mm}-${dd}`
-
+export default function RecordsPage() {
   return (
     <div
       style={{
@@ -28,7 +22,6 @@ export default function AttendancePage() {
           overflow: 'hidden',
         }}
       >
-        {/* Top nav / brand bar */}
         <header
           style={{
             display: 'flex',
@@ -65,10 +58,10 @@ export default function AttendancePage() {
                   color: '#111827',
                 }}
               >
-                BXTrack Attendance 
+                BXTrack Records
               </div>
               <div style={{ fontSize: 11, color: '#fef9c3' }}>
-                Attendance &amp; Time Tracking
+                HR Records &amp; Reports
               </div>
             </div>
           </div>
@@ -96,13 +89,11 @@ export default function AttendancePage() {
             <a
               href="/dashboard/attendance"
               style={{
-                padding: '0.35rem 0.9rem',
+                padding: '0.35rem 0.8rem',
                 borderRadius: 999,
-                color: '#f97316',
-                background: '#fffbeb',
+                color: '#fffbeb',
                 textDecoration: 'none',
-                fontWeight: 600,
-                border: '1px solid rgba(248,113,113,0.6)',
+                border: '1px solid rgba(254,249,195,0.35)',
               }}
             >
               Attendance
@@ -122,11 +113,13 @@ export default function AttendancePage() {
             <a
               href="/dashboard/records"
               style={{
-                padding: '0.35rem 0.8rem',
+                padding: '0.35rem 0.9rem',
                 borderRadius: 999,
-                color: '#fffbeb',
+                color: '#f97316',
+                background: '#fffbeb',
                 textDecoration: 'none',
-                border: '1px solid rgba(254,249,195,0.35)',
+                fontWeight: 600,
+                border: '1px solid rgba(248,113,113,0.6)',
               }}
             >
               Records
@@ -158,32 +151,17 @@ export default function AttendancePage() {
                   letterSpacing: 0.02,
                 }}
               >
-                Daily Attendance
+                HR Records
               </h1>
               <p style={{ margin: '0.25rem 0 0', fontSize: 12, color: '#6b7280' }}>
-                First check-in to last check-out defines working time. Multiple punches
-                are preserved for full audit history.
+                View and edit leave, overtime, and short leave from Google Sheets. Filter by month and export CSV.
               </p>
-            </div>
-            <div
-              style={{
-                fontSize: 11,
-                color: '#92400e',
-                padding: '0.35rem 0.7rem',
-                borderRadius: 999,
-                border: '1px solid rgba(248,113,113,0.35)',
-                background: '#fffbeb',
-              }}
-            >
-              Device IPs synced • {process.env.K50_IPS || process.env.K50_IP || 'N/A'}
             </div>
           </div>
 
-          <AttendanceClient defaultDate={defaultDate} />
+          <RecordsClient />
         </main>
       </div>
     </div>
   )
 }
-
-
