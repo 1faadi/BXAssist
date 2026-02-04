@@ -41,6 +41,9 @@ declare namespace NodeJS {
 
     // Birthday cron token (optional)
     BIRTHDAY_CRON_TOKEN?: string
+
+    // Dashboard password (optional; default bxtrack2026)
+    DASHBOARD_PASSWORD?: string
   }
 }
 
