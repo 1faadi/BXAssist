@@ -359,6 +359,19 @@ export async function POST(req: NextRequest) {
         })
       }
 
+      const MAX_BLOCK_TEXT = 3000
+      const sectionBlocks: { type: 'section'; text: { type: 'plain_text'; text: string; emoji: boolean } }[] = []
+      for (let i = 0; i < messageText.length; i += MAX_BLOCK_TEXT) {
+        sectionBlocks.push({
+          type: 'section',
+          text: {
+            type: 'plain_text',
+            text: messageText.slice(i, i + MAX_BLOCK_TEXT),
+            emoji: true,
+          },
+        })
+      }
+
       await slackClient.chat.postMessage({
         channel: weeklyChannelId,
         text: messageText,
@@ -367,10 +380,7 @@ export async function POST(req: NextRequest) {
             type: 'context',
             elements: [{ type: 'mrkdwn', text: `Weekly report from <@${userId}>` }],
           },
-          {
-            type: 'section',
-            text: { type: 'plain_text', text: messageText, emoji: true },
-          },
+          ...sectionBlocks,
         ],
       })
 
