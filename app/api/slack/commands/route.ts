@@ -581,12 +581,26 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      if (result.reportCount === 0) {
+      const dailyReports = result.dailyReports ?? []
+      if (dailyReports.length === 0) {
         return NextResponse.json({
           response_type: 'ephemeral',
           text: 'No daily reports found this week. Use `/daily-report` first.',
         })
       }
+
+      const blocks = dailyReports.map((day, i) => ({
+        type: 'input' as const,
+        block_id: `wr_day_${i}`,
+        label: { type: 'plain_text' as const, text: day.dateStr },
+        element: {
+          type: 'plain_text_input' as const,
+          action_id: 'value' as const,
+          multiline: true,
+          initial_value: day.content,
+          max_length: 3000,
+        },
+      }))
 
       await slackClient.views.open({
         trigger_id: triggerId,
@@ -596,21 +610,13 @@ export async function POST(req: NextRequest) {
           title: { type: 'plain_text', text: 'Weekly Report' },
           submit: { type: 'plain_text', text: 'Send' },
           close: { type: 'plain_text', text: 'Cancel' },
-          private_metadata: JSON.stringify({ weeklyChannelId }),
-          blocks: [
-            {
-              type: 'input',
-              block_id: 'wr_message',
-              label: { type: 'plain_text', text: 'Your weekly report (edit as needed)' },
-              element: {
-                type: 'plain_text_input',
-                action_id: 'value',
-                multiline: true,
-                initial_value: result.compiledText,
-                max_length: 3000,
-              },
-            },
-          ],
+          private_metadata: JSON.stringify({
+            weeklyChannelId,
+            reporterName: result.reporterName ?? `<@${userId}>`,
+            dateRangeStr: result.dateRangeStr ?? '',
+            dayCount: dailyReports.length,
+          }),
+          blocks,
         },
       })
 

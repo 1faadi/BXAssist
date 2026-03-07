@@ -318,23 +318,44 @@ export async function POST(req: NextRequest) {
       payload.view?.callback_id === 'weekly_report_modal'
     ) {
       const state = payload.view.state.values
-      const messageText = state.wr_message?.value?.value ?? ''
       let weeklyChannelId: string
+      let reporterName: string
+      let dateRangeStr: string
+      let dayCount: number
       try {
         const metadata = JSON.parse(payload.view.private_metadata || '{}')
         weeklyChannelId = metadata.weeklyChannelId
+        reporterName = metadata.reporterName ?? ''
+        dateRangeStr = metadata.dateRangeStr ?? ''
+        dayCount = metadata.dayCount ?? 0
       } catch {
         return NextResponse.json({
           response_action: 'errors',
-          errors: { wr_message: 'Invalid context. Please try again.' },
+          errors: { wr_day_0: 'Invalid context. Please try again.' },
         })
       }
       const userId = payload.user.id
 
+      const dayParts: string[] = []
+      for (let i = 0; i < dayCount; i++) {
+        const blockId = `wr_day_${i}`
+        const val = state[blockId]?.value?.value?.trim() ?? ''
+        if (val) dayParts.push(val)
+      }
+
+      const messageText = [
+        'Weekly Progress Report',
+        reporterName ? `Reporter: ${reporterName} | Week: ${dateRangeStr}` : '',
+        '',
+        ...dayParts,
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+
       if (!weeklyChannelId || !messageText.trim()) {
         return NextResponse.json({
           response_action: 'errors',
-          errors: { wr_message: 'Message cannot be empty.' },
+          errors: { wr_day_0: 'At least one day must have content.' },
         })
       }
 

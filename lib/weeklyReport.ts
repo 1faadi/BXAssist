@@ -7,12 +7,19 @@
 
 import { slackClient } from '@/lib/slackClient'
 
-const MODAL_MAX_LENGTH = 3000
-const TRUNCATE_SUFFIX = '\n\n[... truncated - edit and add details as needed]'
+const INPUT_MAX_LENGTH = 3000
+const TRUNCATE_SUFFIX = '\n\n[... truncated]'
+
+export interface DailyReportContent {
+  dateStr: string
+  content: string
+}
 
 export interface FetchAndCompileResult {
   success: boolean
-  compiledText?: string
+  dailyReports?: DailyReportContent[]
+  reporterName?: string
+  dateRangeStr?: string
   reportCount?: number
   error?: string
 }
@@ -160,30 +167,22 @@ function parseDailyReportBlocks(blocks: unknown[]): ParsedDailyReport | null {
 }
 
 /**
- * Compile parsed reports into plain text for the modal
+ * Compile a single day's report into plain text (for one modal input)
  */
-function compileToText(reports: ParsedDailyReport[], dateRangeStr: string, userMention: string): string {
+function compileDayContent(r: ParsedDailyReport): string {
   const lines: string[] = [
-    'Weekly Progress Report',
-    `Reporter: ${userMention} | Week: ${dateRangeStr}`,
-    '',
+    `--- ${r.dateStr} ---`,
+    `Project: ${r.project} | Hours: ${r.hours}`,
+    'Progress:',
+    r.progress ? r.progress.split('\n').map((l) => `  ${l}`).join('\n') : '  (none)',
   ]
-
-  for (const r of reports) {
-    lines.push(`--- ${r.dateStr} ---`)
-    lines.push(`Project: ${r.project} | Hours: ${r.hours}`)
-    lines.push('Progress:')
-    lines.push(r.progress ? r.progress.split('\n').map((l) => `  ${l}`).join('\n') : '  (none)')
-    if (r.tomorrowPlan) {
-      lines.push("Tomorrow's Plan:")
-      lines.push(r.tomorrowPlan.split('\n').map((l) => `  ${l}`).join('\n'))
-    }
-    lines.push('')
+  if (r.tomorrowPlan) {
+    lines.push("Tomorrow's Plan:")
+    lines.push(r.tomorrowPlan.split('\n').map((l) => `  ${l}`).join('\n'))
   }
-
   let text = lines.join('\n').trim()
-  if (text.length > MODAL_MAX_LENGTH) {
-    text = text.slice(0, MODAL_MAX_LENGTH - TRUNCATE_SUFFIX.length) + TRUNCATE_SUFFIX
+  if (text.length > INPUT_MAX_LENGTH) {
+    text = text.slice(0, INPUT_MAX_LENGTH - TRUNCATE_SUFFIX.length) + TRUNCATE_SUFFIX
   }
   return text
 }
@@ -223,7 +222,7 @@ export async function fetchAndCompileWeeklyReport(
     }
 
     if (userReports.length === 0) {
-      return { success: true, compiledText: '', reportCount: 0 }
+      return { success: true, dailyReports: [], reportCount: 0 }
     }
 
     userReports.sort((a, b) => a.dateSort.localeCompare(b.dateSort))
@@ -241,11 +240,16 @@ export async function fetchAndCompileWeeklyReport(
       // fallback to mention if user lookup fails
     }
 
-    const compiledText = compileToText(userReports, dateRangeStr, reporterName)
+    const dailyReports: DailyReportContent[] = userReports.map((r) => ({
+      dateStr: r.dateStr,
+      content: compileDayContent(r),
+    }))
 
     return {
       success: true,
-      compiledText,
+      dailyReports,
+      reporterName,
+      dateRangeStr,
       reportCount: userReports.length,
     }
   } catch (err) {
